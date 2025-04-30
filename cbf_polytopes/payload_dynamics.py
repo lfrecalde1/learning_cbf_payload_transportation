@@ -8,9 +8,13 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker
 import time
-from cbf_polytopes import fancy_plots_3, plot_states_position, fancy_plots_4, plot_control_actions_reference, plot_angular_velocities
+from cbf_polytopes import fancy_plots_3, plot_states_position, fancy_plots_4, plot_control_actions_reference, plot_angular_velocities, plot_states_quaternion, plot_control_actions_force, plot_control_actions_tau
 from cbf_polytopes import fancy_plots_1, plot_error_norm
 import matplotlib.pyplot as plt
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
+from scipy.spatial.transform import Rotation as R
+
 
 # Casadi Functions
 def quatTorot_c(quat):
@@ -62,6 +66,46 @@ def rotation_matrix_error_c():
 
     return error_matrix_f
 
+def cost_quaternion_casadi(qd, q):
+    # Conjugate of desired quaternion
+    qd_conjugate = ca.vertcat(qd[0], -qd[1], -qd[2], -qd[3])
+
+    # Quaternion multiplication q_e = qd_conjugate * q
+    H_r_plus = ca.vertcat(
+        ca.horzcat(qd_conjugate[0], -qd_conjugate[1], -qd_conjugate[2], -qd_conjugate[3]),
+        ca.horzcat(qd_conjugate[1], qd_conjugate[0], qd_conjugate[3], -qd_conjugate[2]),
+        ca.horzcat(qd_conjugate[2], -qd_conjugate[3], qd_conjugate[0], qd_conjugate[1]),
+        ca.horzcat(qd_conjugate[3], qd_conjugate[2], -qd_conjugate[1], qd_conjugate[0])
+    )
+    
+    q_error = H_r_plus @ q
+
+    ## Shortest path: if q_error[0] < 0, flip the sign
+    condition = q_error[0] < 0
+    q_error = ca.if_else(condition, -q_error, q_error)
+
+    # Compute the angle and the log map
+    norm_vec = ca.norm_2(q_error[1:4] + ca.np.finfo(np.float64).eps)
+    angle = 2 * ca.atan2(norm_vec, q_error[0])
+
+    # Avoid division by zero
+    ln_quaternion = ca.vertcat(0.0, (1/2)*angle*q_error[1]/norm_vec, (1/2)*angle*q_error[2]/norm_vec, (1/2)*angle*q_error[3]/norm_vec)
+    return  ln_quaternion
+
+def hat_casadi(v):
+    return ca.vertcat(
+        ca.horzcat(0, -v[2], v[1]),
+        ca.horzcat(v[2], 0, -v[0]),
+        ca.horzcat(-v[1], v[0], 0)
+    )
+
+def hat(v):
+    return np.array([
+        [0, -v[2], v[1]],
+        [v[2], 0, -v[0]],
+        [-v[1], v[0], 0]
+    ])
+
 ## Functions from casadi 
 rotation_error_norm_f = rotation_matrix_error_norm_c()
 rotation_error_f = rotation_matrix_error_c()
@@ -72,7 +116,7 @@ class PayloadDynamicsNode(Node):
 
         # Time Definition
         self.ts = 0.05
-        self.final = 10
+        self.final = 20
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Internal parameters defintion
@@ -85,6 +129,13 @@ class PayloadDynamicsNode(Node):
         self.cable_lenght = np.array([1.0, 1.0, 1.0], dtype=np.double)
         self.z = np.array([0.0, 0.0, 1.0], dtype=np.double)
 
+        # Load shape parameters triangle
+        self.p1 = np.array([0.15, 0.0, 0.0])
+        self.p2 = np.array([-0.15, 0.2, 0.0])
+        self.p3 = np.array([-0.15, -0.2, 0.0])
+        self.p = np.vstack((self.p1, self.p2, self.p3)).T
+        self.length = 1.5
+
         # Computing explicit dynamics of the sytem only symbolic values
         self.payload_dynamics = self.system_dynamics()
 
@@ -92,8 +143,13 @@ class PayloadDynamicsNode(Node):
         self.odom_payload_msg = Odometry()
         self.publisher_payload_odom_ = self.create_publisher(Odometry, "odom", 10)
 
+        self.odom_payload_desired_msg = Odometry()
+        self.publisher_payload_desired_odom_ = self.create_publisher(Odometry, "desired", 10)
+
+        self.tf_broadcaster = TransformBroadcaster(self)
+
         # Position of the system
-        pos_0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        pos_0 = np.array([0.0, 0.0, 2.0], dtype=np.double)
         # Linear velocity of the sytem respect to the inertial frame
         vel_0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         # Angular velocity respect to the Body frame
@@ -107,7 +163,7 @@ class PayloadDynamicsNode(Node):
         self.n_u = 6
 
         # MPC Parameters
-        self.N = 10
+        self.N = 20
         self.n_controls = self.n_u
         self.n_states = self.n_x
 
@@ -233,7 +289,7 @@ class PayloadDynamicsNode(Node):
 
         # Linear Dynamics
         linear_velocity = v_p
-        linear_acceleration = (1/self.mass)*R@F - self.gravity*self.z
+        linear_acceleration = (1/self.mass)*F - self.gravity*self.z
 
         # Angular Dynamics
         quat_dt = self.quatdot_c(quat, omega)
@@ -257,6 +313,137 @@ class PayloadDynamicsNode(Node):
         casadi_kutta = Function('casadi_kutta',[x, u, ts], [xk]) 
 
         return casadi_kutta
+    
+    def publish_transforms(self, payload, wrench):
+        tf_world_load = TransformStamped()
+        tf_world_load.header.stamp = self.get_clock().now().to_msg()
+        tf_world_load.header.frame_id = 'world'            # <-- world is the parent
+        tf_world_load.child_frame_id = 'payload'          # <-- imu_link is rotated
+        tf_world_load.transform.translation.x = payload[0]
+        tf_world_load.transform.translation.y = payload[1]
+        tf_world_load.transform.translation.z = payload[2]
+        tf_world_load.transform.rotation.x = payload[7]
+        tf_world_load.transform.rotation.y = payload[8]
+        tf_world_load.transform.rotation.z = payload[9]
+        tf_world_load.transform.rotation.w = payload[6]
+## --------------------------------------------------------------------------------------------------------------------
+        ro = self.ro_w(payload)
+        tf_world_p1 = TransformStamped()
+        tf_world_p1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p1.header.frame_id = 'payload'
+        tf_world_p1.child_frame_id = 'p1'
+        tf_world_p1.transform.translation.x = self.p1[0]
+        tf_world_p1.transform.translation.y = self.p1[1]
+        tf_world_p1.transform.translation.z = self.p1[2]
+
+        tf_world_p2 = TransformStamped()
+        tf_world_p2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p2.header.frame_id = 'payload'
+        tf_world_p2.child_frame_id = 'p2'
+        tf_world_p2.transform.translation.x = self.p2[0]
+        tf_world_p2.transform.translation.y = self.p2[1]
+        tf_world_p2.transform.translation.z = self.p2[2]
+
+        tf_world_p3 = TransformStamped()
+        tf_world_p3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_p3.header.frame_id = 'payload'
+        tf_world_p3.child_frame_id = 'p3'
+        tf_world_p3.transform.translation.x = self.p3[0]
+        tf_world_p3.transform.translation.y = self.p3[1]
+        tf_world_p3.transform.translation.z = self.p3[2]
+
+## ----------------------------------------------------------------------------------------------------
+        quadrotors = self.quadrotors_w(payload, wrench)
+        tf_world_q1 = TransformStamped()
+        tf_world_q1.header.stamp = self.get_clock().now().to_msg()
+        tf_world_q1.header.frame_id = 'world'
+        tf_world_q1.child_frame_id = 'quadrotor_1'
+        tf_world_q1.transform.translation.x = quadrotors[0, 0]
+        tf_world_q1.transform.translation.y = quadrotors[1, 0]
+        tf_world_q1.transform.translation.z = quadrotors[2, 0]
+
+        tf_world_q2 = TransformStamped()
+        tf_world_q2.header.stamp = self.get_clock().now().to_msg()
+        tf_world_q2.header.frame_id = 'world'
+        tf_world_q2.child_frame_id = 'quadrotor_2'
+        tf_world_q2.transform.translation.x = quadrotors[0, 1]
+        tf_world_q2.transform.translation.y = quadrotors[1, 1]
+        tf_world_q2.transform.translation.z = quadrotors[2, 1]
+
+        tf_world_q3 = TransformStamped()
+        tf_world_q3.header.stamp = self.get_clock().now().to_msg()
+        tf_world_q3.header.frame_id = 'world'
+        tf_world_q3.child_frame_id = 'quadrotor_3'
+        tf_world_q3.transform.translation.x = quadrotors[0, 2]
+        tf_world_q3.transform.translation.y = quadrotors[1, 2]
+        tf_world_q3.transform.translation.z = quadrotors[2, 2]
+
+        tf_p1_q1 = TransformStamped()
+        tf_p1_q1.header.stamp = self.get_clock().now().to_msg()
+        tf_p1_q1.header.frame_id = 'p1'
+        tf_p1_q1.child_frame_id = 'quadrotor_1_aux'
+        aux = -(wrench[:, 0]/np.linalg.norm(wrench[:, 0]))*self.length
+        tf_p1_q1.transform.translation.x = aux[0]
+        tf_p1_q1.transform.translation.y = aux[1]
+        tf_p1_q1.transform.translation.z = aux[2]
+
+        ## Broadcast both transforms
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_world_q1, tf_world_q2, tf_world_q3, tf_world_p1, tf_world_p2, tf_world_p3])
+        return None
+    def ro_w(self, payload):
+        # Rotation payload
+        q = np.array([payload[7], payload[8], payload[9], payload[6]])
+        R_object = R.from_quat(q)
+        R_ql = R_object.as_matrix()
+
+        # Translation
+        t = payload[0:3]
+
+        ro = np.zeros((3, self.p.shape[1]))
+
+        for k in range(0, self.p.shape[1]):
+            ro[:, k] = t + R_ql@self.p[:, k]
+        return ro
+
+    def quadrotors_w(self, payload, tension):
+        # Rotation payload
+        q = np.array([payload[7], payload[8], payload[9], payload[6]])
+        R_object = R.from_quat(q)
+        R_ql = R_object.as_matrix()
+
+        # Translation
+        t = payload[0:3]
+
+        quat = np.zeros((3, self.p.shape[1]))
+
+        for k in range(0, self.p.shape[1]):
+            quat[:, k] = t + R_ql@self.p[:, k] + (tension[:, k]/np.linalg.norm(tension[:, k]))*self.length
+        return quat
+    
+    def jacobian_forces(self, wrench, payload):
+        I = np.eye(3)
+        top_block = np.hstack([I, I, I])  # shape: (3, 9)
+
+        # Block 2: three rotation matrices
+        q = np.array([payload[7], payload[8], payload[9], payload[6]])
+        R_object = R.from_quat(q)
+        R_ql = R_object.as_matrix()
+
+        p1_hat = hat(self.p1)
+        p2_hat = hat(self.p2)
+        p3_hat = hat(self.p3)
+
+        bottom_block = np.hstack([p1_hat@R_ql.T, p2_hat@R_ql.T, p3_hat@R_ql.T])  # shape: (3, 9)
+
+        # Final 6x9 matrix
+        P = np.vstack([top_block, bottom_block])
+
+        #
+        tension = np.linalg.pinv(P)@wrench
+        tensions_vectors = tension.reshape(-1, 3).T
+        return tensions_vectors
+
+
 
     def MPC(self):
         # Sparse matrix for the inertia
@@ -321,7 +508,7 @@ class PayloadDynamicsNode(Node):
 
         # Linear Dynamics
         linear_velocity = v_p
-        linear_acceleration = (1/self.mass)*R@F - self.gravity*self.z
+        linear_acceleration = (1/self.mass)*F - self.gravity*self.z
 
         # Angular Dynamics
         quat_dt = self.quatdot_c(quat, omega)
@@ -347,7 +534,7 @@ class PayloadDynamicsNode(Node):
         c1 = 1
         kv_min = c1 + 1/4 + 0.1
         kp_min = (c1*(kv_min*kv_min) + 2*kv_min*c1 - c1*c1)/((self.mass)*(4*(kv_min - c1)-1))
-        kp_min = 25.0
+        kp_min = 80
         print(kp_min)
         print(kv_min)
         print(c1)
@@ -356,7 +543,7 @@ class PayloadDynamicsNode(Node):
         ## Compute minimiun values for the angular controller
         eigenvalues = np.linalg.eigvals(self.inertia)
         min_eigenvalue = np.min(eigenvalues)
-        c2 = 0.05
+        c2 = 0.2
         kw_min = (1/2)*c2 + (1/4) + 0.1
         kr_min = c2*(kw_min*kw_min)/(min_eigenvalue*(4*(kw_min - (1/2)*c2) - 1))
         print(kr_min)
@@ -365,7 +552,7 @@ class PayloadDynamicsNode(Node):
         print("--------------------------")
 
         ## Gains Constrol Actions
-        R_force = 0.5*np.eye(3)
+        R_force = 10*np.eye(3)
         R_torque = 1*np.eye(3)
 
         # Cost initial Value
@@ -405,11 +592,11 @@ class PayloadDynamicsNode(Node):
             error_velocity_quad = quad_vel_states - quad_vel_state_references
 
             # Angular error and angular velocity error
-            angular_displacement_error = rotation_error_norm_f(quat_references, quat)
+            angular_displacement_error = cost_quaternion_casadi(quat_references, quat)
             angular_velocity_error = quad_angular_states - rotation_error_f(quat_references, quat)@quad_angular_state_references
 
             lyapunov_position_quad = (1/2)*kp_min*error_position_quad.T@error_position_quad + (1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + c1*error_position_quad.T@error_velocity_quad
-            lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + (1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error + c2*angular_displacement_error.T@angular_velocity_error
+            lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + (1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
 
 
             # Control Action Desired
@@ -441,36 +628,37 @@ class PayloadDynamicsNode(Node):
         # TERMINAL COST
         quad_pos_states = ca.vertcat(X[0, self.N], X[1, self.N], X[2, self.N])
         # Quadrotor states reference position
-        quad_pos_state_references = ca.vertcat(1, 1, 1)
+        quad_pos_state_references = xd[0:3]
 
         # Quadrotor states velocity
         quad_vel_states = ca.vertcat(X[3, self.N], X[4, self.N], X[5, self.N])
 
         # Quadrotor states reference velocity
-        quad_vel_state_references = ca.vertcat(0.0, 0.0, 0.0)
+        quad_vel_state_references = xd[3:6]
 
         # Quadrotor states quaternions
         quat = ca.vertcat(X[6, self.N], X[7, self.N], X[8, self.N], X[9, self.N])
 
         # Quadrotor states reference quaternions
-        quat_references = ca.vertcat(1.0, 0.0, 0.0, 0.0)
+        quat_references = xd[6:10]
 
         # Quadrotor states angular velocity
         quad_angular_states = ca.vertcat(X[10, self.N], X[11, self.N], X[12, self.N])
+
         # Quadrotor states reference angular velocity
-        quad_angular_state_references = ca.vertcat(0.0, 0.0, 0.0)
+        quad_angular_state_references = xd[10:13]
 
         # Computing translational error of the sytem quadrotor
         error_position_quad = quad_pos_states - quad_pos_state_references
         error_velocity_quad = quad_vel_states - quad_vel_state_references
 
         # Angular error and angular velocity error
-        angular_displacement_error = rotation_error_norm_f(quat_references, quat)
+        angular_displacement_error = cost_quaternion_casadi(quat_references, quat)
         angular_velocity_error = quad_angular_states - rotation_error_f(quat_references, quat)@quad_angular_state_references
 
 
         lyapunov_position_quad = (1/2)*kp_min*error_position_quad.T@error_position_quad + (1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + c1*error_position_quad.T@error_velocity_quad
-        lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + (1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error + c2*angular_displacement_error.T@angular_velocity_error
+        lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + (1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
         cost_fn = cost_fn + lyapunov_position_quad + lyapunov_orientation_quad
 
         # Reshape optimization variable
@@ -527,10 +715,10 @@ class PayloadDynamicsNode(Node):
 
 
         # Constrainst control actions 
-        F_min = ca.DM([-10, -10, 0])
-        F_max = ca.DM([10, 10, 30])
-        T_min = ca.DM([-0.03, -0.03, -0.03])
-        T_max = ca.DM([0.03, 0.03, 0.03])
+        F_min = ca.DM([-5, -5, 0])
+        F_max = ca.DM([5, 5, 30])
+        T_min = ca.DM([-0.1, -0.1, -0.1])
+        T_max = ca.DM([0.1, 0.1, 0.1])
 
         v_min = ca.repmat(ca.vertcat(F_min, T_min), self.N, 1)
         v_max = ca.repmat(ca.vertcat(F_max, T_max), self.N, 1)
@@ -542,26 +730,26 @@ class PayloadDynamicsNode(Node):
 
         return solver, args
 
-    def send_odometry(self, x):
+    def send_odometry(self, x, odom_payload_msg, publisher_payload_odom):
         position = x[0:3]
         quat = x[6:10]
 
         # Function that send odometry
 
-        self.odom_payload_msg.header.frame_id = "world"
-        self.odom_payload_msg.header.stamp = self.get_clock().now().to_msg()
+        odom_payload_msg.header.frame_id = "world"
+        odom_payload_msg.header.stamp = self.get_clock().now().to_msg()
 
-        self.odom_payload_msg.pose.pose.position.x = position[0]
-        self.odom_payload_msg.pose.pose.position.y = position[1]
-        self.odom_payload_msg.pose.pose.position.z = position[2]
+        odom_payload_msg.pose.pose.position.x = position[0]
+        odom_payload_msg.pose.pose.position.y = position[1]
+        odom_payload_msg.pose.pose.position.z = position[2]
 
-        self.odom_payload_msg.pose.pose.orientation.x = quat[1]
-        self.odom_payload_msg.pose.pose.orientation.y = quat[2]
-        self.odom_payload_msg.pose.pose.orientation.z = quat[3]
-        self.odom_payload_msg.pose.pose.orientation.w = quat[0]
+        odom_payload_msg.pose.pose.orientation.x = quat[1]
+        odom_payload_msg.pose.pose.orientation.y = quat[2]
+        odom_payload_msg.pose.pose.orientation.z = quat[3]
+        odom_payload_msg.pose.pose.orientation.w = quat[0]
 
         # Send Messag
-        self.publisher_payload_odom_.publish(self.odom_payload_msg)
+        publisher_payload_odom.publish(odom_payload_msg)
         return None 
 
     def run(self):
@@ -570,7 +758,6 @@ class PayloadDynamicsNode(Node):
         u = np.zeros((self.n_u, self.t.shape[0] - self.N), dtype=np.double)
 
         x[:, 0] = self.x_0
-        u[2, :] = (self.mass + 0.0001)*self.gravity
 
         # Check MPC
         solver, args = self.MPC()
@@ -579,19 +766,24 @@ class PayloadDynamicsNode(Node):
         u0[2, :] = self.mass*self.gravity
         X0 = ca.repmat(x[:, 0], 1, self.N+1)
 
+        # Desired states
         xd = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N), dtype=np.double)
         xd[0, :] = 1.0
         xd[1, :] = 1.0
-        xd[2, :] = 1.0
+        xd[2, :] = 3.0
         
         xd[3, :] = 0.0
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        xd[6, :] = 1.0
-        xd[7, :] = 0.0
-        xd[8, :] = 0.0
-        xd[9, :] = 0.0
+        theta1 = 1*np.pi/2
+        n1 = np.array([0.0, 0.0, 1.0])
+        qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
+
+        xd[6, :] = qd[0]
+        xd[7, :] = qd[1]
+        xd[8, :] = qd[2]
+        xd[9, :] = qd[3]
         
         xd[10, :] = 0.0
         xd[11, :] = 0.0
@@ -604,11 +796,13 @@ class PayloadDynamicsNode(Node):
             # Set init States optimizer
             args['p'] = ca.vertcat(x[:, k], xd[:, k])
             # Send Odometry
-            self.send_odometry(x[:, k])
+            self.send_odometry(x[:, k], self.odom_payload_msg, self.publisher_payload_odom_)
+            self.send_odometry(xd[:, k], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
 
             ## Control
             args['x0'] = ca.vertcat(ca.reshape(X0, self.n_states*(self.N+1), 1), ca.reshape(u0, self.n_controls*self.N, 1))
 
+            # Set up states for optimal control
             sol = solver(
                 x0=args['x0'],
                 lbx=args['lbx'],
@@ -617,19 +811,24 @@ class PayloadDynamicsNode(Node):
                 ubg=args['ubg'],
                 p=args['p'])
 
+            # Get optimal control values and states
             u_optimal = ca.reshape(sol['x'][self.n_states * (self.N + 1):], self.n_controls, self.N)
             X0 = ca.reshape(sol['x'][: self.n_states * (self.N+1)], self.n_states, self.N+1)
+            u[:, k] = np.array(u_optimal[:, 0]).reshape((6,))
+
+            # Publish frames
+            tension_vector = self.jacobian_forces(u[:, k], x[:, k])
+            self.publish_transforms(x[:, k], tension_vector)
+
 
 
             # Dynamics of the system
-            x_k = np.array(self.payload_dynamics(x[:, k], u_optimal[:, 0], self.ts))
+            x_k = np.array(self.payload_dynamics(x[:, k], u[:, k], self.ts))
             x[:, k + 1] = x_k.reshape((self.n_x, ))
 
-            ## Update optimalk values
+            ## Update optimal values
             u0 = ca.horzcat(u_optimal[:, 1:],ca.reshape(u_optimal[:, -1], -1, 1))
             X0 = ca.horzcat(X0[:, 1:],ca.reshape(X0[:, -1], -1, 1))
-
-
 
             # Section to guarantee same sample times
             while (time.time() - tic <= self.ts):
@@ -640,18 +839,21 @@ class PayloadDynamicsNode(Node):
             self.get_logger().info("PAYLOAD DYNAMICS")
 
         # Results of the system
-        #fig11, ax11, ax21, ax31 = fancy_plots_3()
-        #plot_states_position(fig11, ax11, ax21, ax31, x[0:3, :], self.h_d[0:3, :], self.t, "Position of the System No drag")
-        #plt.show()
+        fig11, ax11, ax21, ax31 = fancy_plots_3()
+        plot_states_position(fig11, ax11, ax21, ax31, x[0:3, :], xd[0:3, :], self.t, "Position of the System No drag")
+        plt.show()
 
-        ## Control Actions
-        #fig13, ax13, ax23, ax33, ax43 = fancy_plots_4()
-        #plot_control_actions_reference(fig13, ax13, ax23, ax33, ax43, F, M, self.f_d, self.M_d, self.t, "Control Actions of the System No Drag")
-        #plt.show()
+        fig12, ax12, ax22, ax32, ax42 = fancy_plots_4()
+        plot_states_quaternion(fig12, ax12, ax22, ax32, ax42, x[6:10, :], xd[6:10, :], self.t, "Quaternions of the System No drag")
+        plt.show()
 
-        #fig14, ax14 = fancy_plots_1()
-        #plot_error_norm(fig14, ax14, h_e, self.t, "Error Norm of the System No Drag")
-        #plt.show()
+        fig13, ax13, ax23, ax33 = fancy_plots_3()
+        plot_control_actions_force(fig13, ax13, ax23, ax33, u[0:3, :], self.t, "Force Control Action of the System No drag")
+        plt.show()
+
+        fig14, ax14, ax24, ax34 = fancy_plots_3()
+        plot_control_actions_tau(fig14, ax14, ax24, ax34, u[3:6, :], self.t, "Torque Control Action of the System No drag")
+        plt.show()
         return None
 
 def main(arg = None):

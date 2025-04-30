@@ -9,6 +9,11 @@ Panels:
         - /Axes1
         - /Odometry1
         - /Odometry1/Shape1
+        - /Odometry2
+        - /Odometry2/Shape1
+        - /TF1
+        - /TF1/Frames1
+        - /TF1/Tree1
       Splitter Ratio: 0.5
     Tree Height: 1244
   - Class: rviz_common/Selection
@@ -80,7 +85,7 @@ Visualization Manager:
       Position Tolerance: 0.10000000149011612
       Shape:
         Alpha: 1
-        Axes Length: 0.20000000298023224
+        Axes Length: 0.10000000149011612
         Axes Radius: 0.05000000074505806
         Color: 255; 25; 0
         Head Length: 0.30000001192092896
@@ -96,9 +101,110 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /odom
       Value: true
+    - Angle Tolerance: 0.10000000149011612
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: true
+      Keep: 1
+      Name: Odometry
+      Position Tolerance: 0.10000000149011612
+      Shape:
+        Alpha: 1
+        Axes Length: 0.5
+        Axes Radius: 0.009999999776482582
+        Color: 255; 25; 0
+        Head Length: 0.30000001192092896
+        Head Radius: 0.10000000149011612
+        Shaft Length: 1
+        Shaft Radius: 0.05000000074505806
+        Value: Axes
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /desired
+      Value: true
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+        imu_link:
+          Value: true
+        p1:
+          Value: true
+        p1_aux:
+          Value: true
+        p2:
+          Value: true
+        p2_aux:
+          Value: true
+        p3:
+          Value: true
+        p3_aux:
+          Value: true
+        payload:
+          Value: true
+        quadrotor_1:
+          Value: true
+        quadrotor_1_aux:
+          Value: true
+        quadrotor_2:
+          Value: true
+        quadrotor_3:
+          Value: true
+        world:
+          Value: true
+      Marker Scale: 0.699999988079071
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Tree:
+        world:
+          imu_link:
+            {}
+          p1_aux:
+            {}
+          p2_aux:
+            {}
+          p3_aux:
+            {}
+          payload:
+            p1:
+              quadrotor_1_aux:
+                {}
+            p2:
+              {}
+            p3:
+              {}
+          quadrotor_1:
+            {}
+          quadrotor_2:
+            {}
+          quadrotor_3:
+            {}
+      Update Interval: 0
+      Value: true
   Enabled: true
   Global Options:
-    Background Color: 255; 255; 255
+    Background Color: 36; 31; 49
     Fixed Frame: world
     Frame Rate: 30
   Name: root
@@ -142,7 +248,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.316620349884033
+      Distance: 8.46908950805664
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -157,10 +263,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5452045798301697
+      Pitch: 1.14479660987854
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.534928321838379
+      Yaw: 0.7885445952415466
     Saved: ~
 Window Geometry:
   Displays:
