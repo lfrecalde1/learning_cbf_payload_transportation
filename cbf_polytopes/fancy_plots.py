@@ -601,7 +601,7 @@ def plot_states_euler(fig11, ax11, ax21, ax31, x, xd, t, name):
         fig11.savefig(name + ".png")
         return None
 
-def plot_time(fig11, ax11, x_sample, x_sample_real, t, name):
+def plot_manipulability(fig11, ax11, x_sample,  t, name):
         t = t[0:x_sample.shape[1]]
         ax11.set_xlim((t[0], t[-1]))
 
@@ -609,19 +609,15 @@ def plot_time(fig11, ax11, x_sample, x_sample_real, t, name):
         state_1_e, = ax11.plot(t[0:t.shape[0]], x_sample[0, 0:t.shape[0]],
                     color='#C43C29', lw=1.0, ls="--")
 
-        state_1_e_d, = ax11.plot(t[0:t.shape[0]], x_sample_real[0, 0:t.shape[0]],
-                    color='#1D2121', lw=1.0, ls="-")
-
-
-        ax11.set_ylabel(r"$[m]$", rotation='vertical')
-        ax11.legend([state_1_e, state_1_e_d],
-                [ r'$dt$', r'$sample~time$'],
+        ax11.set_ylabel(r"manipulability", rotation='vertical')
+        ax11.legend([state_1_e],
+                [ r'm'],
                 loc="best",
                 frameon=True, fancybox=True, shadow=False, ncol=2,
                 borderpad=0.5, labelspacing=0.5, handlelength=3, handletextpad=0.1,
                 borderaxespad=0.3, columnspacing=2)
         ax11.grid(color='#949494', linestyle='-.', linewidth=0.5)
-        ax11.set_xlabel(r"$\textrm{Time}[s]$", labelpad=5)
+        ax11.set_xlabel(r"Time", labelpad=5)
 
         fig11.savefig(name + ".pdf")
         fig11.savefig(name + ".png")

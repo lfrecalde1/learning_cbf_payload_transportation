@@ -23,6 +23,7 @@ setup(
             'payload_dynamics = cbf_polytopes.payload_dynamics:main',
             'save_bag = cbf_polytopes.save_rosbag:main',
             'read_bag = cbf_polytopes.read_bag:main',
+            'read_bag_images = cbf_polytopes.read_bag_images:main',
         ],
     },
 )

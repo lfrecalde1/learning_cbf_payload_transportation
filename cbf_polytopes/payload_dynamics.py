@@ -9,7 +9,7 @@ from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker
 import time
 from cbf_polytopes import fancy_plots_3, plot_states_position, fancy_plots_4, plot_control_actions_reference, plot_angular_velocities, plot_states_quaternion, plot_control_actions_force, plot_control_actions_tau
-from cbf_polytopes import fancy_plots_1, plot_error_norm
+from cbf_polytopes import fancy_plots_1, plot_error_norm, plot_manipulability
 import matplotlib.pyplot as plt
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
@@ -116,7 +116,7 @@ class PayloadDynamicsNode(Node):
 
         # Time Definition
         self.ts = 0.05
-        self.final = 20
+        self.final = 10
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Internal parameters defintion
@@ -130,11 +130,11 @@ class PayloadDynamicsNode(Node):
         self.z = np.array([0.0, 0.0, 1.0], dtype=np.double)
 
         # Load shape parameters triangle
-        self.p1 = np.array([0.15, 0.0, 0.0])
-        self.p2 = np.array([-0.15, 0.2, 0.0])
-        self.p3 = np.array([-0.15, -0.2, 0.0])
+        self.p1 = np.array([0.20, 0.0, 0.0])
+        self.p2 = np.array([-0.2, 0.3, 0.0])
+        self.p3 = np.array([-0.2, -0.3, 0.0])
         self.p = np.vstack((self.p1, self.p2, self.p3)).T
-        self.length = 1.5
+        self.length = 2.0
 
         # Computing explicit dynamics of the sytem only symbolic values
         self.payload_dynamics = self.system_dynamics()
@@ -328,36 +328,59 @@ class PayloadDynamicsNode(Node):
         tf_world_load.transform.rotation.w = payload[6]
 ## --------------------------------------------------------------------------------------------------------------------
         ro = self.ro_w(payload)
+        tf_payload_p1 = TransformStamped()
+        tf_payload_p1.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p1.header.frame_id = 'payload'
+        tf_payload_p1.child_frame_id = 'p1'
+        tf_payload_p1.transform.translation.x = self.p1[0]
+        tf_payload_p1.transform.translation.y = self.p1[1]
+        tf_payload_p1.transform.translation.z = self.p1[2]
+
+        tf_payload_p2 = TransformStamped()
+        tf_payload_p2.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p2.header.frame_id = 'payload'
+        tf_payload_p2.child_frame_id = 'p2'
+        tf_payload_p2.transform.translation.x = self.p2[0]
+        tf_payload_p2.transform.translation.y = self.p2[1]
+        tf_payload_p2.transform.translation.z = self.p2[2]
+
+        tf_payload_p3 = TransformStamped()
+        tf_payload_p3.header.stamp = self.get_clock().now().to_msg()
+        tf_payload_p3.header.frame_id = 'payload'
+        tf_payload_p3.child_frame_id = 'p3'
+        tf_payload_p3.transform.translation.x = self.p3[0]
+        tf_payload_p3.transform.translation.y = self.p3[1]
+        tf_payload_p3.transform.translation.z = self.p3[2]
+## -----------------------------------------------------------------
         tf_world_p1 = TransformStamped()
         tf_world_p1.header.stamp = self.get_clock().now().to_msg()
-        tf_world_p1.header.frame_id = 'payload'
-        tf_world_p1.child_frame_id = 'p1'
-        tf_world_p1.transform.translation.x = self.p1[0]
-        tf_world_p1.transform.translation.y = self.p1[1]
-        tf_world_p1.transform.translation.z = self.p1[2]
+        tf_world_p1.header.frame_id = 'world'
+        tf_world_p1.child_frame_id = 'p1_aux'
+        tf_world_p1.transform.translation.x = ro[0, 0]
+        tf_world_p1.transform.translation.y = ro[1, 0]
+        tf_world_p1.transform.translation.z = ro[2, 0]
 
         tf_world_p2 = TransformStamped()
         tf_world_p2.header.stamp = self.get_clock().now().to_msg()
-        tf_world_p2.header.frame_id = 'payload'
-        tf_world_p2.child_frame_id = 'p2'
-        tf_world_p2.transform.translation.x = self.p2[0]
-        tf_world_p2.transform.translation.y = self.p2[1]
-        tf_world_p2.transform.translation.z = self.p2[2]
+        tf_world_p2.header.frame_id = 'world'
+        tf_world_p2.child_frame_id = 'p2_aux'
+        tf_world_p2.transform.translation.x = ro[0, 1]
+        tf_world_p2.transform.translation.y = ro[1, 1]
+        tf_world_p2.transform.translation.z = ro[2, 1]
 
         tf_world_p3 = TransformStamped()
         tf_world_p3.header.stamp = self.get_clock().now().to_msg()
-        tf_world_p3.header.frame_id = 'payload'
-        tf_world_p3.child_frame_id = 'p3'
-        tf_world_p3.transform.translation.x = self.p3[0]
-        tf_world_p3.transform.translation.y = self.p3[1]
-        tf_world_p3.transform.translation.z = self.p3[2]
-
+        tf_world_p3.header.frame_id = 'world'
+        tf_world_p3.child_frame_id = 'p3_aux'
+        tf_world_p3.transform.translation.x = ro[0, 2]
+        tf_world_p3.transform.translation.y = ro[1, 2]
+        tf_world_p3.transform.translation.z = ro[2, 2]
 ## ----------------------------------------------------------------------------------------------------
         quadrotors = self.quadrotors_w(payload, wrench)
         tf_world_q1 = TransformStamped()
         tf_world_q1.header.stamp = self.get_clock().now().to_msg()
         tf_world_q1.header.frame_id = 'world'
-        tf_world_q1.child_frame_id = 'quadrotor_1'
+        tf_world_q1.child_frame_id = 'quadrotor_1_world'
         tf_world_q1.transform.translation.x = quadrotors[0, 0]
         tf_world_q1.transform.translation.y = quadrotors[1, 0]
         tf_world_q1.transform.translation.z = quadrotors[2, 0]
@@ -365,7 +388,7 @@ class PayloadDynamicsNode(Node):
         tf_world_q2 = TransformStamped()
         tf_world_q2.header.stamp = self.get_clock().now().to_msg()
         tf_world_q2.header.frame_id = 'world'
-        tf_world_q2.child_frame_id = 'quadrotor_2'
+        tf_world_q2.child_frame_id = 'quadrotor_2_world'
         tf_world_q2.transform.translation.x = quadrotors[0, 1]
         tf_world_q2.transform.translation.y = quadrotors[1, 1]
         tf_world_q2.transform.translation.z = quadrotors[2, 1]
@@ -373,22 +396,40 @@ class PayloadDynamicsNode(Node):
         tf_world_q3 = TransformStamped()
         tf_world_q3.header.stamp = self.get_clock().now().to_msg()
         tf_world_q3.header.frame_id = 'world'
-        tf_world_q3.child_frame_id = 'quadrotor_3'
+        tf_world_q3.child_frame_id = 'quadrotor_3_world'
         tf_world_q3.transform.translation.x = quadrotors[0, 2]
         tf_world_q3.transform.translation.y = quadrotors[1, 2]
         tf_world_q3.transform.translation.z = quadrotors[2, 2]
 
         tf_p1_q1 = TransformStamped()
         tf_p1_q1.header.stamp = self.get_clock().now().to_msg()
-        tf_p1_q1.header.frame_id = 'p1'
-        tf_p1_q1.child_frame_id = 'quadrotor_1_aux'
-        aux = -(wrench[:, 0]/np.linalg.norm(wrench[:, 0]))*self.length
-        tf_p1_q1.transform.translation.x = aux[0]
-        tf_p1_q1.transform.translation.y = aux[1]
-        tf_p1_q1.transform.translation.z = aux[2]
+        tf_p1_q1.header.frame_id = 'p1_aux'
+        tf_p1_q1.child_frame_id = 'quadrotor_1'
+        data_p1_q1 = (wrench[:, 0]/np.linalg.norm(wrench[:, 0]))*self.length
+        tf_p1_q1.transform.translation.x = data_p1_q1[0]
+        tf_p1_q1.transform.translation.y = data_p1_q1[1]
+        tf_p1_q1.transform.translation.z = data_p1_q1[2]
+
+        tf_p2_q2 = TransformStamped()
+        tf_p2_q2.header.stamp = self.get_clock().now().to_msg()
+        tf_p2_q2.header.frame_id = 'p2_aux'
+        tf_p2_q2.child_frame_id = 'quadrotor_2'
+        data_p2_q2 = (wrench[:, 1]/np.linalg.norm(wrench[:, 1]))*self.length
+        tf_p2_q2.transform.translation.x = data_p2_q2[0]
+        tf_p2_q2.transform.translation.y = data_p2_q2[1]
+        tf_p2_q2.transform.translation.z = data_p2_q2[2]
+
+        tf_p3_q3 = TransformStamped()
+        tf_p3_q3.header.stamp = self.get_clock().now().to_msg()
+        tf_p3_q3.header.frame_id = 'p3_aux'
+        tf_p3_q3.child_frame_id = 'quadrotor_3'
+        data_p3_q3 = (wrench[:, 2]/np.linalg.norm(wrench[:, 2]))*self.length
+        tf_p3_q3.transform.translation.x = data_p3_q3[0]
+        tf_p3_q3.transform.translation.y = data_p3_q3[1]
+        tf_p3_q3.transform.translation.z = data_p3_q3[2]
 
         ## Broadcast both transforms
-        self.tf_broadcaster.sendTransform([tf_world_load, tf_world_q1, tf_world_q2, tf_world_q3, tf_world_p1, tf_world_p2, tf_world_p3])
+        self.tf_broadcaster.sendTransform([tf_world_load, tf_payload_p1, tf_payload_p2, tf_payload_p3, tf_p1_q1, tf_p2_q2, tf_p3_q3, tf_world_p1, tf_world_p2, tf_world_p3, tf_world_q1, tf_world_q2, tf_world_q3])
         return None
     def ro_w(self, payload):
         # Rotation payload
@@ -441,7 +482,7 @@ class PayloadDynamicsNode(Node):
         #
         tension = np.linalg.pinv(P)@wrench
         tensions_vectors = tension.reshape(-1, 3).T
-        return tensions_vectors
+        return tensions_vectors, P
 
 
 
@@ -552,8 +593,8 @@ class PayloadDynamicsNode(Node):
         print("--------------------------")
 
         ## Gains Constrol Actions
-        R_force = 10*np.eye(3)
-        R_torque = 1*np.eye(3)
+        R_force = 50*np.eye(3)
+        R_torque = 50*np.eye(3)
 
         # Cost initial Value
         cost_fn = 0
@@ -776,8 +817,8 @@ class PayloadDynamicsNode(Node):
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi/2
-        n1 = np.array([0.0, 0.0, 1.0])
+        theta1 = 1*np.pi
+        n1 = np.array([0.0, 1.0, 0.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
@@ -788,6 +829,10 @@ class PayloadDynamicsNode(Node):
         xd[10, :] = 0.0
         xd[11, :] = 0.0
         xd[12, :] = 0.0
+
+
+        # Empty Vector Manipulability
+        mani = np.zeros((1, self.t.shape[0] - self.N), dtype=np.double)
         
         # Simulation loop
         for k in range(0, self.t.shape[0] - self.N):
@@ -817,10 +862,13 @@ class PayloadDynamicsNode(Node):
             u[:, k] = np.array(u_optimal[:, 0]).reshape((6,))
 
             # Publish frames
-            tension_vector = self.jacobian_forces(u[:, k], x[:, k])
+            tension_vector, P = self.jacobian_forces(u[:, k], x[:, k])
+            singular_values = np.linalg.svd(np.linalg.pinv(P), compute_uv=False)
+
+            # Smallest singular value
+            sigma_min = np.min(singular_values)
+            mani[:, k] = sigma_min
             self.publish_transforms(x[:, k], tension_vector)
-
-
 
             # Dynamics of the system
             x_k = np.array(self.payload_dynamics(x[:, k], u[:, k], self.ts))
@@ -854,6 +902,12 @@ class PayloadDynamicsNode(Node):
         fig14, ax14, ax24, ax34 = fancy_plots_3()
         plot_control_actions_tau(fig14, ax14, ax24, ax34, u[3:6, :], self.t, "Torque Control Action of the System No drag")
         plt.show()
+
+        # Manipulabillity plot
+        #fig15, ax15 = fancy_plots_1()
+        #plot_manipulability(fig15, ax15, mani, self.t, "Manipulability")
+        #plt.show()
+
         return None
 
 def main(arg = None):
