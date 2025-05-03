@@ -161,20 +161,14 @@ Visualization Manager:
           Value: true
         quadrotor_1:
           Value: true
-        quadrotor_1_aux:
-          Value: true
         quadrotor_1_world:
           Value: false
         quadrotor_2:
           Value: true
-        quadrotor_2_aux:
-          Value: false
         quadrotor_2_world:
           Value: false
         quadrotor_3:
           Value: true
-        quadrotor_3_aux:
-          Value: false
         quadrotor_3_world:
           Value: false
         world:
@@ -187,13 +181,13 @@ Visualization Manager:
       Tree:
         world:
           p1_aux:
-            quadrotor_1_aux:
+            quadrotor_1:
               {}
           p2_aux:
-            quadrotor_2_aux:
+            quadrotor_2:
               {}
           p3_aux:
-            quadrotor_3_aux:
+            quadrotor_3:
               {}
           payload:
             p1:
@@ -202,15 +196,9 @@ Visualization Manager:
               {}
             p3:
               {}
-          quadrotor_1:
-            {}
           quadrotor_1_world:
             {}
-          quadrotor_2:
-            {}
           quadrotor_2_world:
-            {}
-          quadrotor_3:
             {}
           quadrotor_3_world:
             {}
@@ -262,25 +250,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 8.306902885437012
+      Distance: 8.196279525756836
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0
-        Y: 0
-        Z: 0
+        X: 0.20989908277988434
+        Y: 1.4920324087142944
+        Z: 0.828853964805603
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.2747966051101685
+      Pitch: 1.094796895980835
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.888514995574951
+      Yaw: 4.830229759216309
     Saved: ~
 Window Geometry:
   Displays:

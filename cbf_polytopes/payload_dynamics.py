@@ -9,7 +9,7 @@ from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker
 import time
 from cbf_polytopes import fancy_plots_3, plot_states_position, fancy_plots_4, plot_control_actions_reference, plot_angular_velocities, plot_states_quaternion, plot_control_actions_force, plot_control_actions_tau
-from cbf_polytopes import fancy_plots_1, plot_error_norm, plot_manipulability
+from cbf_polytopes import fancy_plots_1, plot_error_norm, plot_manipulability, plot_control_actions_tension, plot_states_velocity
 import matplotlib.pyplot as plt
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
@@ -116,7 +116,7 @@ class PayloadDynamicsNode(Node):
 
         # Time Definition
         self.ts = 0.05
-        self.final = 10
+        self.final = 20
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Internal parameters defintion
@@ -135,6 +135,7 @@ class PayloadDynamicsNode(Node):
         self.p3 = np.array([-0.2, -0.3, 0.0])
         self.p = np.vstack((self.p1, self.p2, self.p3)).T
         self.length = 2.0
+        self.dynamics_constant = 0.2
 
         # Computing explicit dynamics of the sytem only symbolic values
         self.payload_dynamics = self.system_dynamics()
@@ -149,21 +150,26 @@ class PayloadDynamicsNode(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Position of the system
-        pos_0 = np.array([0.0, 0.0, 2.0], dtype=np.double)
+        pos_0 = np.array([0.0, 0.0, 1.0], dtype=np.double)
         # Linear velocity of the sytem respect to the inertial frame
         vel_0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         # Angular velocity respect to the Body frame
         omega_0 = np.array([0.0, 0.0, 0.0], dtype=np.double)
         # Initial Orientation expressed as quaternionn
         quat_0 = np.array([1.0, 0.0, 0.0, 0.0])
+        
+        # Initial Wrench
+        Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
 
         # Auxiliary vector [x, v, q, w], which is used to update the odometry and the states of the system
-        self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0))
+        self.init = np.hstack((pos_0, vel_0, quat_0, omega_0))
+        tension_matrix, P, tension_vector = self.jacobian_forces(Wrench0, self.init)
+        self.x_0 = np.hstack((pos_0, vel_0, quat_0, omega_0, tension_vector))
         self.n_x = self.x_0.shape[0]
-        self.n_u = 6
+        self.n_u = 9
 
         # MPC Parameters
-        self.N = 20
+        self.N = 10
         self.n_controls = self.n_u
         self.n_states = self.n_x
 
@@ -241,18 +247,20 @@ class PayloadDynamicsNode(Node):
         I_sym[2, 2] = self.inertia[2, 2]
 
         #define input variables
-        f1 = ca.MX.sym("f1")
-        f2 = ca.MX.sym("f2")
-        f3 = ca.MX.sym("f3")
-        F = ca.vertcat(f1, f2, f3)              #force in Inertial frame
+        f1x_cmd = ca.MX.sym("f1x_cmd")
+        f1y_cmd = ca.MX.sym("f1y_cmd")
+        f1z_cmd = ca.MX.sym("f1z_cmd")
 
-        tau_1 = ca.MX.sym("tau_1")
-        tau_2 = ca.MX.sym("tau_2")
-        tau_3 = ca.MX.sym("tau_3")
-        tau = ca.vertcat(tau_1, tau_2, tau_3)              #moments in Payload frame
+        f2x_cmd = ca.MX.sym("f2x_cmd")
+        f2y_cmd = ca.MX.sym("f2y_cmd")
+        f2z_cmd = ca.MX.sym("f2z_cmd")
+
+        f3x_cmd = ca.MX.sym("f3x_cmd")
+        f3y_cmd = ca.MX.sym("f3y_cmd")
+        f3z_cmd = ca.MX.sym("f3z_cmd")
 
         # Complete control action with null space operator, we can also separe this 
-        u = ca.vertcat(f1, f2, f3, tau_1, tau_2, tau_3)
+        u_cmd = ca.vertcat(f1x_cmd, f1y_cmd, f1z_cmd, f2x_cmd, f2y_cmd, f2z_cmd, f3x_cmd, f3y_cmd, f3z_cmd)
 
         #position 
         p_x = ca.MX.sym('p_x')
@@ -280,37 +288,71 @@ class PayloadDynamicsNode(Node):
 
         omega = ca.vertcat(wx, wy, wz) 
 
+        #define input variables
+        f1x = ca.MX.sym("f1x")
+        f1y = ca.MX.sym("f1y")
+        f1z = ca.MX.sym("f1z")
+        f1 = ca.vertcat(f1x, f1y, f1z)
+
+        f2x = ca.MX.sym("f2x")
+        f2y = ca.MX.sym("f2y")
+        f2z = ca.MX.sym("f2z")
+        f2 = ca.vertcat(f2x, f2y, f2z)
+
+        f3x = ca.MX.sym("f3x")
+        f3y = ca.MX.sym("f3y")
+        f3z = ca.MX.sym("f3z")
+        f3 = ca.vertcat(f3x, f3y, f3z)
+
+        # Complete control action with null space operator, we can also separe this 
+        u = ca.vertcat(f1x, f1y, f1z, f2x, f2y, f2z, f3x, f3y, f3z)
+
         # Full states of the system
-        x = ca.vertcat(x_p, v_p, quat, omega)
+        x = ca.vertcat(x_p, v_p, quat, omega, u)
 
         # Rotation matrix
         R = self.quatTorot_c(quat)
+
+        # Transformation matrix
+        I = np.eye(3)
+        top_block = ca.horzcat(I, I, I)
+        p1_hat = hat(self.p1)
+        p2_hat = hat(self.p2)
+        p3_hat = hat(self.p3)
+        bottom_block = ca.horzcat(p1_hat@R.T, p2_hat@R.T, p3_hat@R.T)
+
         cc_forces = ca.cross(omega, I_sym@omega)               #colaris and centripetel forces 
 
         # Linear Dynamics
         linear_velocity = v_p
+        F = top_block@u
         linear_acceleration = (1/self.mass)*F - self.gravity*self.z
 
         # Angular Dynamics
         quat_dt = self.quatdot_c(quat, omega)
+        tau = bottom_block@u
         omgega_dot = - ca.inv(I_sym)@(cc_forces) + ca.inv(I_sym)@tau
 
+        u_dot = (1/self.dynamics_constant)*(u_cmd - u)
+
+        # Nonlinear Funcitons
         f_expl = ca.vertcat(linear_velocity,
                             linear_acceleration,
                             quat_dt,
-                            omgega_dot
+                            omgega_dot,
+                            u_dot
                             )
-        dynamics_casadi_f = Function('dynamics_casadi_f',[x, u], [f_expl])
+        dynamics_casadi_f = Function('dynamics_casadi_f',[x, u_cmd], [f_expl])
 
         ## Integration method
-        k1 = dynamics_casadi_f(x, u)
-        k2 = dynamics_casadi_f(x + (1/2)*ts*k1, u)
-        k3 = dynamics_casadi_f(x + (1/2)*ts*k2, u)
-        k4 = dynamics_casadi_f(x + ts*k3, u)
+        k1 = dynamics_casadi_f(x, u_cmd)
+        k2 = dynamics_casadi_f(x + (1/2)*ts*k1, u_cmd)
+        k3 = dynamics_casadi_f(x + (1/2)*ts*k2, u_cmd)
+        k4 = dynamics_casadi_f(x + ts*k3, u_cmd)
 
         # Compute forward Euler method
         xk = x + (1/6)*ts*(k1 + 2*k2 + 2*k3 + k4)
-        casadi_kutta = Function('casadi_kutta',[x, u, ts], [xk]) 
+        casadi_kutta = Function('casadi_kutta',[x, u_cmd, ts], [xk]) 
 
         return casadi_kutta
     
@@ -482,8 +524,27 @@ class PayloadDynamicsNode(Node):
         #
         tension = np.linalg.pinv(P)@wrench
         tensions_vectors = tension.reshape(-1, 3).T
-        return tensions_vectors, P
+        return tensions_vectors, P, tension
 
+
+    def jacobian(self, payload):
+        I = np.eye(3)
+        top_block = np.hstack([I, I, I])  # shape: (3, 9)
+
+        # Block 2: three rotation matrices
+        q = np.array([payload[7], payload[8], payload[9], payload[6]])
+        R_object = R.from_quat(q)
+        R_ql = R_object.as_matrix()
+
+        p1_hat = hat(self.p1)
+        p2_hat = hat(self.p2)
+        p3_hat = hat(self.p3)
+
+        bottom_block = np.hstack([p1_hat@R_ql.T, p2_hat@R_ql.T, p3_hat@R_ql.T])  # shape: (3, 9)
+
+        # Final 6x9 matrix
+        P = np.vstack([top_block, bottom_block])
+        return P
 
 
     def MPC(self):
@@ -499,19 +560,24 @@ class PayloadDynamicsNode(Node):
         I_sym[2, 2] = self.inertia[2, 2]
 
         #define input variables
-        f1 = ca.MX.sym("f1")
-        f2 = ca.MX.sym("f2")
-        f3 = ca.MX.sym("f3")
-        F = ca.vertcat(f1, f2, f3)              #force in Inertial frame
+        f1x_cmd = ca.MX.sym("f1x_cmd")
+        f1y_cmd = ca.MX.sym("f1y_cmd")
+        f1z_cmd = ca.MX.sym("f1z_cmd")
+        f1_cmd = ca.vertcat(f1x_cmd, f1y_cmd, f1z_cmd)
 
-        tau_1 = ca.MX.sym("tau_1")
-        tau_2 = ca.MX.sym("tau_2")
-        tau_3 = ca.MX.sym("tau_3")
-        tau = ca.vertcat(tau_1, tau_2, tau_3)              #moments in Payload frame
+        f2x_cmd = ca.MX.sym("f2x_cmd")
+        f2y_cmd = ca.MX.sym("f2y_cmd")
+        f2z_cmd = ca.MX.sym("f2z_cmd")
+        f2_cmd = ca.vertcat(f2x_cmd, f2y_cmd, f2z_cmd)
+
+        f3x_cmd = ca.MX.sym("f3x_cmd")
+        f3y_cmd = ca.MX.sym("f3y_cmd")
+        f3z_cmd = ca.MX.sym("f3z_cmd")
+        f3_cmd = ca.vertcat(f3x_cmd, f3y_cmd, f3z_cmd)
 
         # Complete control action with null space operator, we can also separe this 
-        u = ca.vertcat(f1, f2, f3, tau_1, tau_2, tau_3)
-        n_controls = u.numel()
+        u_cmd = ca.vertcat(f1x_cmd, f1y_cmd, f1z_cmd, f2x_cmd, f2y_cmd, f2z_cmd, f3x_cmd, f3y_cmd, f3z_cmd)
+        n_controls = u_cmd.numel()
 
         #position 
         p_x = ca.MX.sym('p_x')
@@ -539,31 +605,73 @@ class PayloadDynamicsNode(Node):
 
         omega = ca.vertcat(wx, wy, wz) 
 
+        #define input variables
+        f1x = ca.MX.sym("f1x")
+        f1y = ca.MX.sym("f1y")
+        f1z = ca.MX.sym("f1z")
+        f1 = ca.vertcat(f1x, f1y, f1z)
+
+        f2x = ca.MX.sym("f2x")
+        f2y = ca.MX.sym("f2y")
+        f2z = ca.MX.sym("f2z")
+        f2 = ca.vertcat(f2x, f2y, f2z)
+
+        f3x = ca.MX.sym("f3x")
+        f3y = ca.MX.sym("f3y")
+        f3z = ca.MX.sym("f3z")
+        f3 = ca.vertcat(f3x, f3y, f3z)
+
+        # Complete control action with null space operator, we can also separe this 
+        u = ca.vertcat(f1x, f1y, f1z, f2x, f2y, f2z, f3x, f3y, f3z)
+
         # Full states of the system
-        x = ca.vertcat(x_p, v_p, quat, omega)
+        x = ca.vertcat(x_p, v_p, quat, omega, u)
         n_states = x.numel()
 
         # Rotation matrix
         R = self.quatTorot_c(quat)
+
+        # Transformation matrix
+        I = np.eye(3)
+        top_block = ca.horzcat(I, I, I)
+        p1_hat = hat(self.p1)
+        p2_hat = hat(self.p2)
+        p3_hat = hat(self.p3)
+        bottom_block = ca.horzcat(p1_hat@R.T, p2_hat@R.T, p3_hat@R.T)
+        P = ca.vertcat(top_block, bottom_block)
+
         cc_forces = ca.cross(omega, I_sym@omega)               #colaris and centripetel forces 
 
         # Linear Dynamics
         linear_velocity = v_p
+        F = top_block@u
         linear_acceleration = (1/self.mass)*F - self.gravity*self.z
 
         # Angular Dynamics
         quat_dt = self.quatdot_c(quat, omega)
+        tau = bottom_block@u
         omgega_dot = - ca.inv(I_sym)@(cc_forces) + ca.inv(I_sym)@tau
+
+        u_dot = (1/self.dynamics_constant)*(u_cmd - u)
 
         # Nonlinear Funcitons
         f_expl = ca.vertcat(linear_velocity,
                             linear_acceleration,
                             quat_dt,
-                            omgega_dot
+                            omgega_dot,
+                            u_dot
                             )
-
         # Nonlinear Dynamics 
-        dynamics_casadi_f = Function('dynamics_casadi_f',[x, u], [f_expl])
+        dynamics_casadi_f = Function('dynamics_casadi_f',[x, u_cmd], [f_expl])
+
+        # Velocity quadrotors
+        x_quat1_dot = linear_velocity + R@(ca.cross(omega, self.p1)) - (self.length/(ca.norm_2(f1)*self.dynamics_constant))@(I-(f1@f1.T)/(f1.T@f1))@f1 + (self.length/(ca.norm_2(f1)*self.dynamics_constant))@(I-(f1@f1.T)/(f1.T@f1))@f1_cmd
+        x_quat2_dot = linear_velocity + R@(ca.cross(omega, self.p2)) - (self.length/(ca.norm_2(f2)*self.dynamics_constant))@(I-(f2@f2.T)/(f2.T@f2))@f2 + (self.length/(ca.norm_2(f2)*self.dynamics_constant))@(I-(f2@f2.T)/(f2.T@f2))@f2_cmd
+        x_quat3_dot = linear_velocity + R@(ca.cross(omega, self.p3)) - (self.length/(ca.norm_2(f3)*self.dynamics_constant))@(I-(f3@f3.T)/(f3.T@f3))@f3 + (self.length/(ca.norm_2(f3)*self.dynamics_constant))@(I-(f3@f3.T)/(f3.T@f3))@f3_cmd
+
+        x_quat1_dot_f = Function('velocity_quat_1_casadi_f',[x, u_cmd], [x_quat1_dot])
+        x_quat2_dot_f = Function('velocity_quat_2_casadi_f',[x, u_cmd], [x_quat2_dot])
+        x_quat3_dot_f = Function('velocity_quat_3_casadi_f',[x, u_cmd], [x_quat3_dot])
 
         # Create Symbolic values of the predicitrons and control actions
         X = ca.MX.sym('X', n_states, self.N + 1)
@@ -593,8 +701,12 @@ class PayloadDynamicsNode(Node):
         print("--------------------------")
 
         ## Gains Constrol Actions
-        R_force = 50*np.eye(3)
-        R_torque = 50*np.eye(3)
+        R_tension = 50*np.eye(9)
+
+        Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
+        tension_matrix, P_matrix, tension_vector = self.jacobian_forces(Wrench0, self.x_0)
+        Damping_gaing = 30
+        velocity_gain = 1
 
         # Cost initial Value
         cost_fn = 0
@@ -636,24 +748,20 @@ class PayloadDynamicsNode(Node):
             angular_displacement_error = cost_quaternion_casadi(quat_references, quat)
             angular_velocity_error = quad_angular_states - rotation_error_f(quat_references, quat)@quad_angular_state_references
 
-            lyapunov_position_quad = (1/2)*kp_min*error_position_quad.T@error_position_quad + (1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + c1*error_position_quad.T@error_velocity_quad
-            lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + (1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
-
-
-            # Control Action Desired
-            force_desired = ca.vertcat(0.0, 0.0, self.mass*self.gravity)
-            torque_desired = ca.vertcat(0.0, 0.0, 0.0)
-
-            force_real = U[0:3, k]
-            torque_real = U[3:6, k]
+            lyapunov_position_quad = (1/2)*kp_min*error_position_quad.T@error_position_quad + Damping_gaing*(1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + c1*error_position_quad.T@error_velocity_quad
+            lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + Damping_gaing*(1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
 
             # Deviation from the nominal values
-            error_force = force_desired - force_real
-            error_torque = torque_desired - torque_real
+            error_tension_control = tension_vector - U[:, k]
+            error_tension = tension_vector - X[13:22, k]
+
+            # Velocity quadrotors
+            quad1_velocity = x_quat1_dot_f(X[:, k], U[:, k])
+            quad2_velocity = x_quat2_dot_f(X[:, k], U[:, k])
+            quad3_velocity = x_quat3_dot_f(X[:, k], U[:, k])
 
             # Cost Fucntion
-            cost_fn = cost_fn + lyapunov_position_quad + lyapunov_orientation_quad + error_force.T@R_force@error_force + error_torque.T@R_torque@error_torque
-
+            cost_fn = cost_fn + lyapunov_position_quad + lyapunov_orientation_quad + 1*(error_tension_control.T@R_tension@error_tension_control) + 1*(error_tension.T@R_tension@error_tension) + velocity_gain*(quad1_velocity.T@quad1_velocity) + velocity_gain*(quad2_velocity.T@quad2_velocity) + velocity_gain*(quad3_velocity.T@quad3_velocity)
 
             st_next = X[:, k+1]
             ## Integration method
@@ -696,11 +804,13 @@ class PayloadDynamicsNode(Node):
         # Angular error and angular velocity error
         angular_displacement_error = cost_quaternion_casadi(quat_references, quat)
         angular_velocity_error = quad_angular_states - rotation_error_f(quat_references, quat)@quad_angular_state_references
+        error_tension = tension_vector - X[13:22, self.N]
 
 
-        lyapunov_position_quad = (1/2)*kp_min*error_position_quad.T@error_position_quad + (1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + c1*error_position_quad.T@error_velocity_quad
-        lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + (1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
-        cost_fn = cost_fn + lyapunov_position_quad + lyapunov_orientation_quad
+        lyapunov_position_quad = (1/2)*kp_min*error_position_quad.T@error_position_quad + Damping_gaing*(1/2)*(self.mass)*error_velocity_quad.T@error_velocity_quad + c1*error_position_quad.T@error_velocity_quad
+        lyapunov_orientation_quad = kr_min*angular_displacement_error.T@angular_displacement_error + Damping_gaing*(1/2)*angular_velocity_error.T@self.inertia@angular_velocity_error
+        cost_fn = cost_fn + lyapunov_position_quad + lyapunov_orientation_quad + 1*(error_tension.T@R_tension@error_tension)
+
 
         # Reshape optimization variable
         OPT_variables = ca.vertcat(X.reshape((-1, 1)),U.reshape((-1, 1)))
@@ -736,6 +846,18 @@ class PayloadDynamicsNode(Node):
         lbx[11: n_states*(self.N+1): n_states] = -6         # Wy lower bound
         lbx[12: n_states*(self.N+1): n_states] = -6         # Wz lower bound
 
+        lbx[13: n_states*(self.N+1): n_states] = -5         # f1x lower bound
+        lbx[14: n_states*(self.N+1): n_states] = -5         # f1y lower bound
+        lbx[15: n_states*(self.N+1): n_states] = 0          # f1z lower bound
+
+        lbx[16: n_states*(self.N+1): n_states] = -5         # f2x lower bound
+        lbx[17: n_states*(self.N+1): n_states] = -5         # f2y lower bound
+        lbx[18: n_states*(self.N+1): n_states] = 0          # f2z lower bound
+
+        lbx[19: n_states*(self.N+1): n_states] = -5         # f3x lower bound
+        lbx[20: n_states*(self.N+1): n_states] = -5         # f3y lower bound
+        lbx[21: n_states*(self.N+1): n_states] = 0          # f3z lower bound
+
         ### ----------------------------------------------------------------- Upper contraints -------------------------------------
         ubx[0: n_states*(self.N+1): n_states] = ca.inf      # X upper bound
         ubx[1: n_states*(self.N+1): n_states] = ca.inf      # Y upper bound
@@ -754,22 +876,31 @@ class PayloadDynamicsNode(Node):
         ubx[11: n_states*(self.N+1): n_states] = 6          # Wy upper bound
         ubx[12: n_states*(self.N+1): n_states] = 6          # Wz upper bound
 
+        ubx[13: n_states*(self.N+1): n_states] = 5          # f1x upper bound
+        ubx[14: n_states*(self.N+1): n_states] = 5          # f1y upper bound
+        ubx[15: n_states*(self.N+1): n_states] = 30         # f1z upper bound
+
+        ubx[16: n_states*(self.N+1): n_states] = 5          # f2x upper bound
+        ubx[17: n_states*(self.N+1): n_states] = 5          # f2y upper bound
+        ubx[18: n_states*(self.N+1): n_states] = 30         # f2z upper bound
+
+        ubx[19: n_states*(self.N+1): n_states] = 5          # f3x upper bound
+        ubx[20: n_states*(self.N+1): n_states] = 5          # f3y upper bound
+        ubx[21: n_states*(self.N+1): n_states] = 30         # f3z upper bound
 
         # Constrainst control actions 
-        F_min = ca.DM([-5, -5, 0])
-        F_max = ca.DM([5, 5, 30])
-        T_min = ca.DM([-0.1, -0.1, -0.1])
-        T_max = ca.DM([0.1, 0.1, 0.1])
+        F_min = ca.DM([-5, -5, 0, -5, -5, 0, -5, -5, 0])
+        F_max = ca.DM([5, 5, 30, 5, 5, 30, 5, 5, 10])
 
-        v_min = ca.repmat(ca.vertcat(F_min, T_min), self.N, 1)
-        v_max = ca.repmat(ca.vertcat(F_max, T_max), self.N, 1)
+        v_min = ca.repmat(ca.vertcat(F_min), self.N, 1)
+        v_max = ca.repmat(ca.vertcat(F_max), self.N, 1)
 
         lbx[n_states*(self.N+1):] = v_min
         ubx[n_states*(self.N+1):] = v_max
 
         args = {'lbg': ca.DM.zeros((n_states*(self.N+1), 1)), 'ubg': ca.DM.zeros((n_states*(self.N+1), 1)), 'lbx': lbx, 'ubx': ubx}
 
-        return solver, args
+        return solver, args, x_quat1_dot_f, x_quat2_dot_f, x_quat3_dot_f
 
     def send_odometry(self, x, odom_payload_msg, publisher_payload_odom):
         position = x[0:3]
@@ -797,44 +928,68 @@ class PayloadDynamicsNode(Node):
         # Set the states to simulate
         x = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N), dtype=np.double)
         u = np.zeros((self.n_u, self.t.shape[0] - self.N), dtype=np.double)
-
+        wrench = np.zeros((6, self.t.shape[0] - self.N), dtype=np.double)
+        # initial States of the system
         x[:, 0] = self.x_0
 
         # Check MPC
-        solver, args = self.MPC()
-
+        solver, args, q1_velocity_f, q2_velocity_f, q3_velocity_f = self.MPC()
         u0 = ca.DM.zeros((self.n_controls, self.N))  # initial control
-        u0[2, :] = self.mass*self.gravity
+        Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
+        tension_matrix, P, tension_vector = self.jacobian_forces(Wrench0, x[:, 0])
+        u0[:, 0] = tension_vector
+
         X0 = ca.repmat(x[:, 0], 1, self.N+1)
 
-        # Desired states
+        ### Desired states
         xd = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N), dtype=np.double)
-        xd[0, :] = 1.0
-        xd[1, :] = 1.0
-        xd[2, :] = 3.0
-        
+        xd[0, :] = 1
+        xd[1, :] = 0
+        xd[2, :] = 1.0
+        ##
         xd[3, :] = 0.0
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi
-        n1 = np.array([0.0, 1.0, 0.0])
+        theta1 = 1*np.pi/2
+        n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
         xd[7, :] = qd[1]
         xd[8, :] = qd[2]
         xd[9, :] = qd[3]
-        
+        ##
         xd[10, :] = 0.0
         xd[11, :] = 0.0
         xd[12, :] = 0.0
 
+        # Tension As states so we need the full state
+        xd[13, :] = tension_vector[0]
+        xd[14, :] = tension_vector[1]
+        xd[15, :] = tension_vector[2]
 
-        # Empty Vector Manipulability
-        mani = np.zeros((1, self.t.shape[0] - self.N), dtype=np.double)
-        
-        # Simulation loop
+        xd[16, :] = tension_vector[3]
+        xd[17, :] = tension_vector[4]
+        xd[18, :] = tension_vector[5]
+
+        xd[19, :] = tension_vector[6]
+        xd[20, :] = tension_vector[7]
+        xd[21, :] = tension_vector[8]
+
+        # Velocities quadrotors
+        quad_1_dot = np.zeros((3, self.t.shape[0] - self.N), dtype=np.double)
+        quad_2_dot = np.zeros((3, self.t.shape[0] - self.N), dtype=np.double)
+        quad_3_dot = np.zeros((3, self.t.shape[0] - self.N), dtype=np.double)
+
+        ## Update states
+        self.send_odometry(x[:, 0], self.odom_payload_msg, self.publisher_payload_odom_)
+        self.send_odometry(xd[:, 0], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
+        tension_matrix = x[13:22, 0].reshape(-1, 3).T
+        self.publish_transforms(x[:, 0], tension_matrix)
+
+        ### Empty Vector Manipulability
+        ### Simulation loop
         for k in range(0, self.t.shape[0] - self.N):
             # Get model
             tic = time.time()
@@ -843,6 +998,10 @@ class PayloadDynamicsNode(Node):
             # Send Odometry
             self.send_odometry(x[:, k], self.odom_payload_msg, self.publisher_payload_odom_)
             self.send_odometry(xd[:, k], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
+
+            # Tension matrix same as the vector but a matrix format
+            tension_matrix = x[13:22, k].reshape(-1, 3).T
+            self.publish_transforms(x[:, k], tension_matrix)
 
             ## Control
             args['x0'] = ca.vertcat(ca.reshape(X0, self.n_states*(self.N+1), 1), ca.reshape(u0, self.n_controls*self.N, 1))
@@ -859,16 +1018,19 @@ class PayloadDynamicsNode(Node):
             # Get optimal control values and states
             u_optimal = ca.reshape(sol['x'][self.n_states * (self.N + 1):], self.n_controls, self.N)
             X0 = ca.reshape(sol['x'][: self.n_states * (self.N+1)], self.n_states, self.N+1)
-            u[:, k] = np.array(u_optimal[:, 0]).reshape((6,))
 
-            # Publish frames
-            tension_vector, P = self.jacobian_forces(u[:, k], x[:, k])
-            singular_values = np.linalg.svd(np.linalg.pinv(P), compute_uv=False)
+            # get only the first values of the control sequence
+            u[:, k] = np.array(u_optimal[:, 0]).reshape((9,))
 
-            # Smallest singular value
-            sigma_min = np.min(singular_values)
-            mani[:, k] = sigma_min
-            self.publish_transforms(x[:, k], tension_vector)
+
+            # Jacobian for tranforming tensions to forces and torques
+            P = self.jacobian(x[:, k])
+            wrench[:, k] = P@u[:, k]
+
+            # Computing the velocity of the quadrotor
+            quad_1_dot[:, k] = np.array(q1_velocity_f(x[:, k], u[:, k])).reshape((3,))
+            quad_2_dot[:, k] = np.array(q2_velocity_f(x[:, k], u[:, k])).reshape((3,))
+            quad_3_dot[:, k] = np.array(q3_velocity_f(x[:, k], u[:, k])).reshape((3,))
 
             # Dynamics of the system
             x_k = np.array(self.payload_dynamics(x[:, k], u[:, k], self.ts))
@@ -886,7 +1048,7 @@ class PayloadDynamicsNode(Node):
             self.get_logger().info(f"time: {self.t[k]:.6f} seconds")
             self.get_logger().info("PAYLOAD DYNAMICS")
 
-        # Results of the system
+        ### Results of the system
         fig11, ax11, ax21, ax31 = fancy_plots_3()
         plot_states_position(fig11, ax11, ax21, ax31, x[0:3, :], xd[0:3, :], self.t, "Position of the System No drag")
         plt.show()
@@ -896,19 +1058,39 @@ class PayloadDynamicsNode(Node):
         plt.show()
 
         fig13, ax13, ax23, ax33 = fancy_plots_3()
-        plot_control_actions_force(fig13, ax13, ax23, ax33, u[0:3, :], self.t, "Force Control Action of the System No drag")
+        plot_control_actions_force(fig13, ax13, ax23, ax33, wrench[0:3, :], self.t, "Force Control Action of the System No drag")
         plt.show()
 
         fig14, ax14, ax24, ax34 = fancy_plots_3()
-        plot_control_actions_tau(fig14, ax14, ax24, ax34, u[3:6, :], self.t, "Torque Control Action of the System No drag")
+        plot_control_actions_tau(fig14, ax14, ax24, ax34, wrench[3:6, :], self.t, "Torque Control Action of the System No drag")
         plt.show()
 
-        # Manipulabillity plot
-        #fig15, ax15 = fancy_plots_1()
-        #plot_manipulability(fig15, ax15, mani, self.t, "Manipulability")
-        #plt.show()
+        fig15, ax15, ax25, ax35 = fancy_plots_3()
+        plot_control_actions_tension(fig15, ax15, ax25, ax35, x[13:16, :], u[0:3, :], self.t, "Tensions Action 1 of the System No drag")
+        plt.show()
 
-        return None
+        fig16, ax16, ax26, ax36 = fancy_plots_3()
+        plot_control_actions_tension(fig16, ax16, ax26, ax36, x[16:19, :], u[3:6, :], self.t, "Tensions Action 2 of the System No drag")
+        plt.show()
+
+        fig17, ax17, ax27, ax37 = fancy_plots_3()
+        plot_states_velocity(fig17, ax17, ax27, ax37, quad_1_dot[0:3, :], quad_1_dot[0:3, :], self.t, "Velocity Quadrotor 1 of the System No drag")
+        plt.show()
+
+        fig18, ax18, ax28, ax38 = fancy_plots_3()
+        plot_states_velocity(fig18, ax18, ax28, ax38, quad_2_dot[0:3, :], quad_2_dot[0:3, :], self.t, "Velocity Quadrotor 2 of the System No drag")
+        plt.show()
+
+        fig19, ax19, ax29, ax39 = fancy_plots_3()
+        plot_states_velocity(fig19, ax19, ax29, ax39, quad_3_dot[0:3, :], quad_3_dot[0:3, :], self.t, "Velocity Quadrotor 3 of the System No drag")
+        plt.show()
+
+        ## Manipulabillity plot
+        ##fig15, ax15 = fancy_plots_1()
+        ##plot_manipulability(fig15, ax15, mani, self.t, "Manipulability")
+        ##plt.show()
+
+        #return None
 
 def main(arg = None):
     rclpy.init(args=arg)

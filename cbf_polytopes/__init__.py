@@ -1,3 +1,3 @@
 from .function_quaternions import cost_translation_casadi, cost_quaternion_casadi
 from .fancy_plots import fancy_plots_3, plot_states_position, fancy_plots_4, plot_control_actions_tau, plot_angular_velocities, plot_control_actions_reference, plot_states_quaternion, plot_control_actions_force
-from .fancy_plots import plot_error_norm, fancy_plots_1, plot_manipulability
+from .fancy_plots import plot_error_norm, fancy_plots_1, plot_manipulability, plot_control_actions_tension, plot_states_velocity
