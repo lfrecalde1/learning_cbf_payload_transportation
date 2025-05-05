@@ -116,7 +116,7 @@ class OdomImuImageSynchronizer(Node):
 
         self.image_frames.append(img_np)
 
-        img_filename = os.path.join(self.image_output_folder, f"image_{len(self.image_frames):05d}.png")
+        img_filename = os.path.join(self.image_output_folder, f"image_{len(self.image_frames)-1:05d}.png")
 
         if img_msg.encoding == 'rgb8':
             img_to_save = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -198,7 +198,7 @@ class OdomImuImageSynchronizer(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    rosbag_path = './trajectories'   # <<< Replace with your bag folder
+    rosbag_path = './circle'   # <<< Replace with your bag folder
     node = OdomImuImageSynchronizer(rosbag_path)
 
 if __name__ == '__main__':

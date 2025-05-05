@@ -707,6 +707,7 @@ class PayloadDynamicsNode(Node):
         tension_matrix, P_matrix, tension_vector = self.jacobian_forces(Wrench0, self.x_0)
         Damping_gaing = 30
         velocity_gain = 1
+        f_min = 0.01  # Newtons (set according to your vehicle)
 
         # Cost initial Value
         cost_fn = 0
@@ -774,6 +775,19 @@ class PayloadDynamicsNode(Node):
             st_next_RK4 = X[:, k] + (1/6)*self.ts*(k1 + 2*k2 + 2*k3 + k4)
             g = ca.vertcat(g, st_next - st_next_RK4)
 
+            if k < self.N - 1:
+                delta_u = U[:, k+1] - U[:, k]
+                g = ca.vertcat(g, delta_u)
+            
+            # Force magnitude constraints (norm of each force >= f_min)
+            f1_k = X[13:16, k]
+            f2_k = X[16:19, k]
+            f3_k = X[19:22, k]
+
+            g = ca.vertcat(g, ca.norm_2(f1_k))
+            g = ca.vertcat(g, ca.norm_2(f2_k))
+            g = ca.vertcat(g, ca.norm_2(f3_k))
+
         # TERMINAL COST
         quad_pos_states = ca.vertcat(X[0, self.N], X[1, self.N], X[2, self.N])
         # Quadrotor states reference position
@@ -815,13 +829,22 @@ class PayloadDynamicsNode(Node):
         # Reshape optimization variable
         OPT_variables = ca.vertcat(X.reshape((-1, 1)),U.reshape((-1, 1)))
 
-        # Structure Optimization problem
-        nlp_prob = {'f': cost_fn, 'x': OPT_variables, 'g': g, 'p': P}
-        opts = {'ipopt': {'max_iter': 2000, 'print_level': 0, 'acceptable_tol': 1e-8, 'acceptable_obj_change_tol': 1e-6}, 'print_time': 0}
-
         # Optimization problem to be solved
-        solver = ca.nlpsol('solver', 'ipopt', nlp_prob, opts)
+        nlp_prob = {'f': cost_fn, 'x': OPT_variables, 'g': g, 'p': P}
 
+        opts = {
+            'ipopt': {
+                'max_iter': 10,
+                'print_level': 5,
+                'tol': 1e-6,
+                'acceptable_tol': 1e-8,
+                'acceptable_obj_change_tol': 1e-6,
+                'linear_solver': 'mumps'  # You can also try 'ma57' if available
+            },
+            'print_time': True
+        }
+
+        solver = ca.nlpsol('solver', 'ipopt', nlp_prob, opts)
 
         # Constraints of the system
         lbx = ca.DM.zeros((n_states*(self.N+1) + n_controls*self.N, 1))
@@ -898,7 +921,52 @@ class PayloadDynamicsNode(Node):
         lbx[n_states*(self.N+1):] = v_min
         ubx[n_states*(self.N+1):] = v_max
 
-        args = {'lbg': ca.DM.zeros((n_states*(self.N+1), 1)), 'ubg': ca.DM.zeros((n_states*(self.N+1), 1)), 'lbx': lbx, 'ubx': ubx}
+        delta_u_max = ca.DM([2, 2, 5, 2, 2, 5, 2, 2, 5])
+
+        n_dyn_constraints = n_states*(self.N+1)
+        n_rate_constraints = (self.N - 1)*n_controls
+        n_force_norm_constraints = 3*self.N
+
+        total_constraints = n_dyn_constraints + n_rate_constraints + n_force_norm_constraints
+
+
+        lbg = ca.DM.zeros((n_dyn_constraints + n_rate_constraints, 1))
+        ubg = ca.DM.zeros((n_dyn_constraints + n_rate_constraints, 1))
+
+        # Dynamics constraints bounds (equality)
+        lbg[0:n_dyn_constraints] = 0
+        ubg[0:n_dyn_constraints] = 0
+
+
+        lbg = ca.DM.zeros((total_constraints, 1))
+        ubg = ca.DM.zeros((total_constraints, 1))
+
+        # ------------------------
+        # Dynamics equality constraints
+        lbg[0:n_dyn_constraints] = 0
+        ubg[0:n_dyn_constraints] = 0
+
+        # ------------------------
+        # Control rate limits
+        for k in range(self.N - 1):
+            lbg[n_dyn_constraints + k*n_controls : n_dyn_constraints + (k+1)*n_controls] = -delta_u_max
+            ubg[n_dyn_constraints + k*n_controls : n_dyn_constraints + (k+1)*n_controls] = delta_u_max
+
+        # ------------------------
+        # Force norm constraints
+        f_min = 0.5  # Example minimum tension in N
+
+        for k in range(self.N):
+            idx = n_dyn_constraints + n_rate_constraints + 3*k
+            lbg[idx] = f_min    # Lower bound: force >= f_min
+            lbg[idx+1] = f_min
+            lbg[idx+2] = f_min
+
+            ubg[idx] = ca.inf   # No upper bound on force magnitude
+            ubg[idx+1] = ca.inf
+            ubg[idx+2] = ca.inf
+
+        args = {'lbg': lbg, 'ubg': ubg, 'lbx': lbx, 'ubx': ubx}
 
         return solver, args, x_quat1_dot_f, x_quat2_dot_f, x_quat3_dot_f
 

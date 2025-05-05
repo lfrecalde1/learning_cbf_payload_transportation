@@ -24,6 +24,7 @@ setup(
             'save_bag = cbf_polytopes.save_rosbag:main',
             'read_bag = cbf_polytopes.read_bag:main',
             'read_bag_images = cbf_polytopes.read_bag_images:main',
+            'read_bag_euroc = cbf_polytopes.read_bag_euroc:main',
         ],
     },
 )
