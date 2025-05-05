@@ -135,7 +135,7 @@ class PayloadDynamicsNode(Node):
         self.p3 = np.array([-0.2, -0.3, 0.0])
         self.p = np.vstack((self.p1, self.p2, self.p3)).T
         self.length = 2.0
-        self.dynamics_constant = 0.2
+        self.dynamics_constant = 0.1
 
         # Computing explicit dynamics of the sytem only symbolic values
         self.payload_dynamics = self.system_dynamics()
@@ -176,6 +176,9 @@ class PayloadDynamicsNode(Node):
                             (0.85, 0.325, 0.098, 1.0), # Orange-red
                             (0.929, 0.694, 0.125, 1.0),# Yellow-orange
                             (0.466, 0.674, 0.188, 1.0)]        
+
+        self.gain_cbf_quad_1 = 2.0
+        self.radius = 0.1
         # Position of the system
         pos_0 = np.array([0.0, 0.0, 1.0], dtype=np.double)
         # Linear velocity of the sytem respect to the inertial frame
@@ -917,7 +920,7 @@ class PayloadDynamicsNode(Node):
 
         # Constrainst control actions 
         F_min = ca.DM([-5, -5, 0, -5, -5, 0, -5, -5, 0])
-        F_max = ca.DM([5, 5, 30, 5, 5, 30, 5, 5, 10])
+        F_max = ca.DM([5, 5, 30, 5, 5, 30, 5, 5, 30])
 
         v_min = ca.repmat(ca.vertcat(F_min), self.N, 1)
         v_max = ca.repmat(ca.vertcat(F_max), self.N, 1)
@@ -928,7 +931,92 @@ class PayloadDynamicsNode(Node):
         args = {'lbg': ca.DM.zeros((n_states*(self.N+1), 1)), 'ubg': ca.DM.zeros((n_states*(self.N+1), 1)), 'lbx': lbx, 'ubx': ubx}
 
         return solver, args, x_quat1_dot_f, x_quat2_dot_f, x_quat3_dot_f
+    def casadi_cbf(self):
+        sparsity_I = ca.Sparsity.diag(3)
 
+        # Create symbolic matrix with that sparsity
+        I_sym = ca.MX(sparsity_I)
+
+        # Assign the values from I_load
+        I_sym[0, 0] = self.inertia[0, 0]
+        I_sym[1, 1] = self.inertia[1, 1]
+        I_sym[2, 2] = self.inertia[2, 2]
+
+        #define input variables
+        f1x_cmd = ca.MX.sym("f1x_cmd")
+        f1y_cmd = ca.MX.sym("f1y_cmd")
+        f1z_cmd = ca.MX.sym("f1z_cmd")
+        f1_cmd = ca.vertcat(f1x_cmd, f1y_cmd, f1z_cmd)
+
+        #define input variables
+        f1x_d = ca.MX.sym("f1x_d")
+        f1y_d = ca.MX.sym("f1y_d")
+        f1z_d = ca.MX.sym("f1z_d")
+        f1_d = ca.vertcat(f1x_d, f1y_d, f1z_d)
+
+        #define input variables
+        obsx_1 = ca.MX.sym("obsx_1")
+        obsy_1 = ca.MX.sym("obsy_1")
+        obsz_1 = ca.MX.sym("obsz_1")
+        obs_1 = ca.vertcat(0.76, 0.51, 3.0)
+
+        #position 
+        p_x = ca.MX.sym('p_x')
+        p_y = ca.MX.sym('p_y')
+        p_z = ca.MX.sym('p_z')
+        x_p = ca.vertcat(p_x, p_y, p_z)
+
+        #linear vel
+        vx_p = ca.MX.sym("vx_p")
+        vy_p = ca.MX.sym("vy_p")
+        vz_p = ca.MX.sym("vz_p")   
+        v_p = ca.vertcat(vx_p, vy_p, vz_p)
+
+        #angles quaternion 
+        qw = ca.MX.sym('qw')
+        qx = ca.MX.sym('qx')
+        qy = ca.MX.sym('qy')
+        qz = ca.MX.sym('qz')        
+        quat = ca.vertcat(qw, qx, qy, qz)
+
+        #angular velocity
+        wx = ca.MX.sym('wx')
+        wy = ca.MX.sym('wy',)
+        wz = ca.MX.sym('wz')
+
+        omega = ca.vertcat(wx, wy, wz) 
+
+        #define input variables
+        f1x = ca.MX.sym("f1x")
+        f1y = ca.MX.sym("f1y")
+        f1z = ca.MX.sym("f1z")
+        f1 = ca.vertcat(f1x, f1y, f1z)
+
+        # Full states of the system
+        p = ca.vertcat(x_p, v_p, quat, omega, f1, f1_d)
+
+        # Rotation matrix
+        R = self.quatTorot_c(quat)
+
+        # Transformation matrix
+        I = np.eye(3)
+        # Linear Dynamics
+        linear_velocity = v_p
+
+        x_quat1_dot = linear_velocity + R@(ca.cross(omega, self.p1)) - (self.length/(ca.norm_2(f1)*self.dynamics_constant))@(I-(f1@f1.T)/(f1.T@f1))@f1 + (self.length/(ca.norm_2(f1)*self.dynamics_constant))@(I-(f1@f1.T)/(f1.T@f1))@f1_cmd
+        x_quat1 = x_p + R@self.p1 + (self.length/(ca.norm_2(f1)))@f1
+
+        # Cost Function ditance to the nominal controller
+        Q = 1*ca.DM.eye(3)
+        error_f1 = f1_d - f1_cmd
+        f = (1 / 2) * (error_f1.T)@Q@error_f1
+
+        # Constraint
+        g_expr = -2*(x_quat1 - obs_1).T@x_quat1_dot - self.gain_cbf_quad_1*((x_quat1 - obs_1).T@(x_quat1 - obs_1)- self.radius**2)
+
+        qp = {"x": f1_cmd, "p": p, "f": f, "g": g_expr}
+        solver = ca.qpsol("solver", "qpoases", qp)
+        return solver
     def send_odometry(self, x, odom_payload_msg, publisher_payload_odom):
         position = x[0:3]
         quat = x[6:10]
@@ -1017,6 +1105,7 @@ class PayloadDynamicsNode(Node):
 
         # Check MPC
         solver, args, q1_velocity_f, q2_velocity_f, q3_velocity_f = self.MPC()
+        sollver_qp_1 = self.casadi_cbf()
         u0 = ca.DM.zeros((self.n_controls, self.N))  # initial control
         Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
         tension_matrix, P, tension_vector = self.jacobian_forces(Wrench0, x[:, 0])
@@ -1074,6 +1163,8 @@ class PayloadDynamicsNode(Node):
 
 
         ### Empty Vector Manipulability
+        lbx = [-5.0, -5.0, 0.0]
+        ubx = [5.0, 5.0, 30.0]
         ### Simulation loop
         for k in range(0, self.t.shape[0] - self.N):
             # Get model
@@ -1107,6 +1198,12 @@ class PayloadDynamicsNode(Node):
 
             # get only the first values of the control sequence
             u[:, k] = np.array(u_optimal[:, 0]).reshape((9,))
+
+            # Fillter control actions
+            new_vector = np.hstack((x[0:16, k], u[0:3, k]))
+            solution_qp_1 = sollver_qp_1(lbx=lbx, ubx=ubx, lbg=-ca.inf, ubg=0, p=new_vector)
+            u_optimal_qp = solution_qp_1["x"].full()
+            u[0:3, k] = np.array(u_optimal_qp).reshape((3,))
 
 
             # Jacobian for tranforming tensions to forces and torques
