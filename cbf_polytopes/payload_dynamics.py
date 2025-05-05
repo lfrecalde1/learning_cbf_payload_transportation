@@ -149,6 +149,33 @@ class PayloadDynamicsNode(Node):
 
         self.tf_broadcaster = TransformBroadcaster(self)
 
+        # Mesage for trajectories
+        self.quad_1_msg = Marker()
+        self.quad_1_points = None
+        self.quad_1_trajectory_ = self.create_publisher(Marker, 'quad_1_path', 10)
+
+        self.quad_2_msg = Marker()
+        self.quad_2_points = None
+        self.quad_2_trajectory_ = self.create_publisher(Marker, 'quad_2_path', 10)
+
+        self.quad_3_msg = Marker()
+        self.quad_3_points = None
+        self.quad_3_trajectory_ = self.create_publisher(Marker, 'quad_3_path', 10)
+
+        self.payload_msg = Marker()
+        self.payload_points = None
+        self.payload_trajectory_ = self.create_publisher(Marker, 'payload_path', 10)
+
+        self.quad_msg = [self.quad_1_msg, self.quad_2_msg, self.quad_3_msg, self.payload_msg]
+        self.quad_points = [self.quad_1_points, self.quad_2_points, self.quad_3_points, self.payload_points]
+        self.quad_trajectory_ = [self.quad_1_trajectory_, self.quad_2_trajectory_, self.quad_3_trajectory_, self.payload_trajectory_]
+
+        #Colors 
+        self.blue_colors = [
+                            (0.0, 0.447, 0.741, 1.0),  # Blue (default MATLAB blue)
+                            (0.85, 0.325, 0.098, 1.0), # Orange-red
+                            (0.929, 0.694, 0.125, 1.0),# Yellow-orange
+                            (0.466, 0.674, 0.188, 1.0)]        
         # Position of the system
         pos_0 = np.array([0.0, 0.0, 1.0], dtype=np.double)
         # Linear velocity of the sytem respect to the inertial frame
@@ -923,6 +950,62 @@ class PayloadDynamicsNode(Node):
         # Send Messag
         publisher_payload_odom.publish(odom_payload_msg)
         return None 
+    
+    def init_real_marker(self, x, wrench, marker_msg_real, points_real):
+        p = np.array([[x[0]],
+              [x[1]],
+              [x[2]]])  # Shape (3, 1)
+        quadrotors = self.quadrotors_w(x, wrench)
+        quadrotors = np.hstack([quadrotors, p])
+        for k in range(quadrotors.shape[1]):
+            marker_msg_real[k].header.frame_id = "world"
+            marker_msg_real[k].header.stamp = self.get_clock().now().to_msg()
+            marker_msg_real[k].ns = "trajectory"
+            marker_msg_real[k].id = 0
+            marker_msg_real[k].type = Marker.LINE_STRIP
+            marker_msg_real[k].action = Marker.ADD
+            marker_msg_real[k].pose.orientation.w = 1.0
+            marker_msg_real[k].scale.x = 0.01  # Line width
+            marker_msg_real[k].color.a = 1.0  # Alpha
+            marker_msg_real[k].color.r = 1.0  # Red
+            marker_msg_real[k].color.g = 0.0  # Green
+            marker_msg_real[k].color.b = 0.0  # Blue
+            point = Point()
+            point.x = quadrotors[0, k]
+            point.y = quadrotors[1, k]
+            point.z = quadrotors[2, k]
+            points_real[k] = [point]
+            marker_msg_real[k].points = points_real[k]
+        return None
+
+    def send_marker(self, x, wrench,  marker_msg, points, publisher):
+        p = np.array([[x[0]],
+              [x[1]],
+              [x[2]]])  # Shape (3, 1)
+        quadrotors = self.quadrotors_w(x, wrench)
+        quadrotors = np.hstack([quadrotors, p])
+        for k in range(0, quadrotors.shape[1]):
+            marker_msg[k].header.stamp = self.get_clock().now().to_msg()
+            marker_msg[k].type = Marker.LINE_STRIP
+            marker_msg[k].action = Marker.ADD
+            marker_msg[k].pose.orientation.w = 1.0
+            marker_msg[k].scale.x = 0.01  # Line width
+
+            # Get color from the list (cycle if more than 4 markers)
+            color = self.blue_colors[k % len(self.blue_colors)]
+            marker_msg[k].color.r = color[0]
+            marker_msg[k].color.g = color[1]
+            marker_msg[k].color.b = color[2]
+            marker_msg[k].color.a = color[3]
+
+            point = Point()
+            point.x = quadrotors[0, k]
+            point.y = quadrotors[1, k]
+            point.z = quadrotors[2, k]
+            points[k].append(point)
+            marker_msg[k].points = points[k]
+            publisher[k].publish(marker_msg[k])
+        return None
 
     def run(self):
         # Set the states to simulate
@@ -944,14 +1027,14 @@ class PayloadDynamicsNode(Node):
         ### Desired states
         xd = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N), dtype=np.double)
         xd[0, :] = 1
-        xd[1, :] = 0
+        xd[1, :] = 1
         xd[2, :] = 1.0
         ##
         xd[3, :] = 0.0
         xd[4, :] = 0.0
         xd[5, :] = 0.0
 
-        theta1 = 1*np.pi/2
+        theta1 = -1*np.pi/2
         n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
@@ -987,6 +1070,8 @@ class PayloadDynamicsNode(Node):
         self.send_odometry(xd[:, 0], self.odom_payload_desired_msg, self.publisher_payload_desired_odom_)
         tension_matrix = x[13:22, 0].reshape(-1, 3).T
         self.publish_transforms(x[:, 0], tension_matrix)
+        self.init_real_marker(x[:, 0], tension_matrix, self.quad_msg, self.quad_points)
+
 
         ### Empty Vector Manipulability
         ### Simulation loop
@@ -1002,6 +1087,7 @@ class PayloadDynamicsNode(Node):
             # Tension matrix same as the vector but a matrix format
             tension_matrix = x[13:22, k].reshape(-1, 3).T
             self.publish_transforms(x[:, k], tension_matrix)
+            self.send_marker(x[:, k], tension_matrix,  self.quad_msg, self.quad_points, self.quad_trajectory_)
 
             ## Control
             args['x0'] = ca.vertcat(ca.reshape(X0, self.n_states*(self.N+1), 1), ca.reshape(u0, self.n_controls*self.N, 1))
