@@ -118,7 +118,7 @@ class PayloadDynamicsNode(Node):
 
         # Time Definition
         self.ts = 0.05
-        self.final = 20
+        self.final = 30
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Internal parameters defintion
@@ -132,9 +132,9 @@ class PayloadDynamicsNode(Node):
         self.z = np.array([0.0, 0.0, 1.0], dtype=np.double)
 
         # Load shape parameters triangle
-        self.p1 = np.array([0.20, 0.0, 0.0])
-        self.p2 = np.array([-0.2, 0.3, 0.0])
-        self.p3 = np.array([-0.2, -0.3, 0.0])
+        self.p1 = np.array([0.1, 0.0, 0.0])
+        self.p2 = np.array([-0.1, 0.2, 0.0])
+        self.p3 = np.array([-0.1, -0.2, 0.0])
         self.p = np.vstack((self.p1, self.p2, self.p3)).T
         self.length = 2.0
         self.dynamics_constant = 0.1
@@ -176,6 +176,7 @@ class PayloadDynamicsNode(Node):
 
         self.gain_cbf_quad_1 = 2.0
         self.radius = 0.1
+        self.radius_payload = 0.3
 
         # Obstacles
         self.obs_list = [ca.vertcat(0.76, 0.51, 3.0),
@@ -197,7 +198,10 @@ class PayloadDynamicsNode(Node):
             ca.vertcat(0.62, -0.09, 2.96),
             ca.vertcat(0.42, 0.31, 2.52),
             ca.vertcat(0.70, 0.96, 2.79),
-            ca.vertcat(0.53, 0.51, 3.17)]
+            ca.vertcat(0.53, 0.51, 3.17),
+            ca.vertcat(0.76, 0.72, 0.98),
+            ca.vertcat(0.19, 0.43, 2.78),
+            ca.vertcat(0.84, 0.35, 3.07)]
 
         self.obs_trajectory_ = []
         for k in range(0, len(self.obs_list)):
@@ -754,7 +758,7 @@ class PayloadDynamicsNode(Node):
         Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
         tension_matrix, P_matrix, tension_vector = self.jacobian_forces(Wrench0, self.x_0)
         Damping_gaing = 30
-        velocity_gain = 0.5
+        velocity_gain = 1.0
 
         # Cost initial Value
         cost_fn = 0
@@ -1119,18 +1123,26 @@ class PayloadDynamicsNode(Node):
         linear_jerk = (1/(self.mass*self.dynamics_constant))*top_block@(u_cmd-f)
 
         # obstacle payload
-        obstacle_payload = ca.vertcat(0.59, 0.72, 0.97)
-        distance_payload_obstacle = (x_p - obstacle_payload)
         a_2 = 7.11
         a_1 = 15.66
         a_0 = 10
-        payload_constraint = -2*(3*linear_velocity.T@linear_acceleration + distance_payload_obstacle.T@linear_jerk)
-        payload_constraint_2 = -a_2*2*(linear_velocity.T@linear_velocity + distance_payload_obstacle.T@linear_acceleration)
-        payload_constraint_1 = -a_1*(2*distance_payload_obstacle.T@linear_velocity)
-        payload_constraint_0 = -a_0*(distance_payload_obstacle.T@distance_payload_obstacle - self.radius**2)
-        constraint_load = payload_constraint + payload_constraint_2 + payload_constraint_1 +payload_constraint_0
 
-        g_expr_list.append(constraint_load)
+        for j, obs in enumerate(obj_list):
+            distance_payload_obstacle = x_p - obs
+
+            payload_constraint = -2 * (3 * linear_velocity.T @ linear_acceleration +
+                                       distance_payload_obstacle.T @ linear_jerk)
+            payload_constraint_2 = -a_2 * 2 * (linear_velocity.T @ linear_velocity +
+                                               distance_payload_obstacle.T @ linear_acceleration)
+            payload_constraint_1 = -a_1 * (2 * distance_payload_obstacle.T @ linear_velocity)
+            payload_constraint_0 = -a_0 * (distance_payload_obstacle.T @ distance_payload_obstacle - self.radius_payload**2)
+
+            constraint_load = (payload_constraint +
+                               payload_constraint_2 +
+                               payload_constraint_1 +
+                               payload_constraint_0)
+
+            g_expr_list.append(constraint_load)
 
         g_expr = ca.vertcat(*g_expr_list)
         qp = {"x": u_cmd, "p": p, "f": cost, "g": g_expr}
@@ -1250,8 +1262,8 @@ class PayloadDynamicsNode(Node):
 
         ### Desired states
         xd = np.zeros((self.n_x, self.t.shape[0] + 1 - self.N), dtype=np.double)
-        xd[0, :] = 1
-        xd[1, :] = 1
+        xd[0, :] = 1.2
+        xd[1, :] = 1.2
         xd[2, :] = 1.0
         ##
         xd[3, :] = 0.0
@@ -1259,7 +1271,7 @@ class PayloadDynamicsNode(Node):
         xd[5, :] = 0.0
 
         theta1 = -1*np.pi
-        n1 = np.array([0.0, 1.0, 0.0])
+        n1 = np.array([0.0, 0.0, 1.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
@@ -1301,8 +1313,8 @@ class PayloadDynamicsNode(Node):
         lbx = [-5.0, -5.0, 0.0, -5.0, -5.0, 0.0, -5.0, -5.0, 0.0]
         ubx = [5.0, 5.0, 30.0, 5.0, 5.0, 30.0, 5.0, 5.0, 30.0]
 
-        lbg = -ca.inf * ca.DM.ones(3*len(self.obs_list)+1)
-        ubg = ca.DM.zeros(3*len(self.obs_list)+1)
+        lbg = -ca.inf * ca.DM.ones(3*len(self.obs_list)+len(self.obs_list))
+        ubg = ca.DM.zeros(3*len(self.obs_list)+len(self.obs_list))
 
         #obs_vector = np.hstack(obs_list).reshape((9,))
         obs_vector = np.concatenate(self.obs_list).reshape((3*len(self.obs_list), 1))
