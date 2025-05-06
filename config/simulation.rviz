@@ -643,7 +643,7 @@ Visualization Manager:
       Enabled: true
       History Length: 1
       Name: PointStamped
-      Radius: 0.20000000298023224
+      Radius: 0.10000000149011612
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -658,7 +658,7 @@ Visualization Manager:
       Enabled: true
       History Length: 1
       Name: PointStamped
-      Radius: 0.20000000298023224
+      Radius: 0.10000000149011612
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -673,7 +673,7 @@ Visualization Manager:
       Enabled: true
       History Length: 1
       Name: PointStamped
-      Radius: 0.20000000298023224
+      Radius: 0.10000000149011612
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -728,7 +728,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.155097007751465
+      Distance: 3.720820665359497
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -743,10 +743,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.044797614216804504
+      Pitch: 1.024797797203064
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 2.878390073776245
+      Yaw: 1.881514072418213
     Saved: ~
 Window Geometry:
   Displays:
