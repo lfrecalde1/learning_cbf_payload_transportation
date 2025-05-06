@@ -5,21 +5,15 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
+        - /Axes1
         - /Odometry1/Shape1
         - /Odometry2/Shape1
+        - /TF1
         - /TF1/Frames1
         - /TF1/Tree1
         - /Marker1/Topic1
         - /Marker1/Namespaces1
-        - /PointStamped19
-        - /PointStamped21
-        - /PointStamped22
-        - /PointStamped23
-        - /PointStamped24
-        - /PointStamped25
-        - /PointStamped26
-        - /PointStamped27
-        - /PointStamped28
+        - /PointStamped43
       Splitter Ratio: 0.5
     Tree Height: 1244
   - Class: rviz_common/Selection
@@ -179,7 +173,7 @@ Visualization Manager:
           Value: false
         world:
           Value: true
-      Marker Scale: 0.5
+      Marker Scale: 0.30000001192092896
       Name: TF
       Show Arrows: true
       Show Axes: true
@@ -682,6 +676,231 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /obj_22
       Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_22
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_23
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_24
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_25
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_26
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_27
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_28
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_31
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_30
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_31
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_32
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_33
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_34
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 154; 153; 150
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_35
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 204; 41; 204
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.10000000149011612
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /obj_23
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 36; 31; 49
@@ -728,25 +947,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.720820665359497
+      Distance: 2.9511795043945312
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.4461967945098877
-        Y: 0.22969821095466614
-        Z: 1.5800684690475464
+        X: 1.325015664100647
+        Y: 0.5684869289398193
+        Z: 1.2172448635101318
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.024797797203064
+      Pitch: 0.11979901790618896
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 1.881514072418213
+      Yaw: 2.4164164066314697
     Saved: ~
 Window Geometry:
   Displays:
@@ -764,5 +983,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 2560
-  X: 0
+  X: 2560
   Y: 27

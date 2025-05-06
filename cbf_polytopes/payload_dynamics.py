@@ -118,7 +118,7 @@ class PayloadDynamicsNode(Node):
 
         # Time Definition
         self.ts = 0.05
-        self.final = 30
+        self.final = 10
         self.t =np.arange(0, self.final + self.ts, self.ts, dtype=np.double)
 
         # Internal parameters defintion
@@ -201,7 +201,8 @@ class PayloadDynamicsNode(Node):
             ca.vertcat(0.53, 0.51, 3.17),
             ca.vertcat(0.76, 0.72, 0.98),
             ca.vertcat(0.19, 0.43, 2.78),
-            ca.vertcat(0.84, 0.35, 3.07)]
+            ca.vertcat(0.84, 0.35, 3.07),
+            ca.vertcat(0.60, 0.83, 3.07)]
 
         self.obs_trajectory_ = []
         for k in range(0, len(self.obs_list)):
@@ -758,7 +759,7 @@ class PayloadDynamicsNode(Node):
         Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
         tension_matrix, P_matrix, tension_vector = self.jacobian_forces(Wrench0, self.x_0)
         Damping_gaing = 30
-        velocity_gain = 1.0
+        velocity_gain = 1
 
         # Cost initial Value
         cost_fn = 0
@@ -1098,6 +1099,8 @@ class PayloadDynamicsNode(Node):
 
         g_expr_list = []
 
+        aux_f = []
+
         # Constraints
         for i in range(3):  # Quadrotors
             x_quat = x_quat_list[i]
@@ -1113,7 +1116,8 @@ class PayloadDynamicsNode(Node):
                 g_ij = -h_dot - self.gain_cbf_quad_1 * h
 
                 g_expr_list.append(g_ij)
-
+                aux_f.append(h)
+        distance_obstacles_f = Function('distance_casadi_f',[p], [*aux_f])
         # Constraints of the payload
         # Transformation matrix
         I = np.eye(3)
@@ -1147,7 +1151,7 @@ class PayloadDynamicsNode(Node):
         g_expr = ca.vertcat(*g_expr_list)
         qp = {"x": u_cmd, "p": p, "f": cost, "g": g_expr}
         solver = ca.qpsol("solver", "qpoases", qp)
-        return solver
+        return solver, distance_obstacles_f
     def send_odometry(self, x, odom_payload_msg, publisher_payload_odom):
         position = x[0:3]
         quat = x[6:10]
@@ -1252,7 +1256,7 @@ class PayloadDynamicsNode(Node):
 
         # Check MPC
         solver, args, q1_velocity_f, q2_velocity_f, q3_velocity_f = self.MPC()
-        sollver_qp_1 = self.casadi_cbf()
+        sollver_qp_1, distance_obstacles_f = self.casadi_cbf()
         u0 = ca.DM.zeros((self.n_controls, self.N))  # initial control
         Wrench0 = np.array([0, 0, self.mass*self.gravity, 0, 0, 0])
         tension_matrix, P, tension_vector = self.jacobian_forces(Wrench0, x[:, 0])
@@ -1271,7 +1275,7 @@ class PayloadDynamicsNode(Node):
         xd[5, :] = 0.0
 
         theta1 = -1*np.pi
-        n1 = np.array([0.0, 0.0, 1.0])
+        n1 = np.array([0.0, 1.0, 0.0])
         qd = np.concatenate(([np.cos(theta1 / 2)], np.sin(theta1 / 2) * n1))
 
         xd[6, :] = qd[0]
@@ -1319,6 +1323,9 @@ class PayloadDynamicsNode(Node):
         #obs_vector = np.hstack(obs_list).reshape((9,))
         obs_vector = np.concatenate(self.obs_list).reshape((3*len(self.obs_list), 1))
 
+        distance_list = []
+
+
         ### Simulation loop
         for k in range(0, self.t.shape[0] - self.N):
             # Get model
@@ -1356,6 +1363,9 @@ class PayloadDynamicsNode(Node):
 
             # Fillter control actions
             new_vector = np.hstack((x[:, k], u[:, k], obs_vector[:, 0]))
+            distance = np.array(distance_obstacles_f(new_vector))
+            distance = distance.reshape((distance.shape[0]))
+            distance_list.append(distance)
 
             solution_qp_1 = sollver_qp_1(lbx=lbx, ubx=ubx, lbg=lbg, ubg=ubg, p=new_vector)
             u_optimal_qp = solution_qp_1["x"].full()
@@ -1386,6 +1396,23 @@ class PayloadDynamicsNode(Node):
             self.get_logger().info(f"Sample time: {toc:.6f} seconds")
             self.get_logger().info(f"time: {self.t[k]:.6f} seconds")
             self.get_logger().info("PAYLOAD DYNAMICS")
+        
+
+        distance_list = np.array(distance_list)
+        distance_list = distance_list.T
+
+        plt.figure(figsize=(12, 8))
+
+        for i in range(distance_list.shape[0]):
+            plt.plot(self.t[0:distance_list.shape[1]], distance_list[i, :], label=f'obs_{i}')
+
+        plt.xlabel('Time [s]')
+        plt.ylabel('Distance to Obstacle [m]')
+        plt.title('Distance to Obstacles Over Time')
+        plt.legend(ncol=4, fontsize='small')  # Adjust legend layout and font size
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
 
         ### Results of the system
         fig11, ax11, ax21, ax31 = fancy_plots_3()
